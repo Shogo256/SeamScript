@@ -18,3 +18,8 @@ export const Unknown = {
 export function __unknown(value: unknown): Unknown {
   return value as Unknown;
 }
+
+/** The same for sources that return a promise (`Response.json()`). The promise itself is passed through. */
+export function __unknownAsync(value: PromiseLike<unknown>): Promise<Unknown> {
+  return value as Promise<Unknown>;
+}

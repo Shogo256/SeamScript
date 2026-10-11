@@ -247,6 +247,27 @@ describe("union", () => {
     });
   });
 
+  it("finds the discriminant itself when no key is given", () => {
+    type Up = { dir: "up"; kind: "move"; n: number };
+    type Down = { dir: "down"; kind: "move"; n: number };
+    const Up = __b.object<Up>({ dir: __b.literal("up"), kind: __b.literal("move"), n: __b.number });
+    const Down = __b.object<Down>({ dir: __b.literal("down"), kind: __b.literal("move"), n: __b.number });
+    // "kind" is a literal in both but shares its value, so "dir" is chosen.
+    const Move = __b.union<Up | Down>(() => [Up, Down]);
+    expect(Move.encode({ dir: "down", kind: "move", n: 1 })).toEqual({ dir: "down", kind: "move", n: 1 });
+    expect(__decode(Move, { dir: "up", kind: "move", n: 1 })).toEqual({ ok: true, value: { dir: "up", kind: "move", n: 1 } });
+    expect(__decode(Move, { dir: "left", kind: "move", n: 1 })).toMatchObject({
+      ok: false,
+      error: { path: ["dir"], expected: '"up" | "down"', actual: '"left"' },
+    });
+  });
+
+  it("rejects members without a usable discriminant when first used", () => {
+    const A = __b.object<{ a: string }>({ a: __b.string });
+    const B = __b.object<{ b: string }>({ b: __b.string });
+    expect(() => __decode(__b.union<{ a: string } | { b: string }>(() => [A, B]), {})).toThrow(TypeError);
+  });
+
   it("rejects overlapping members when first used", () => {
     const A = __b.object<{ t: "a" }>({ t: __b.literal("a") });
     const B = __b.object<{ t: "a" | "b" }>({ t: __b.literal("a", "b") });

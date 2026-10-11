@@ -1,5 +1,5 @@
 export { type Ok, type Err, type Result, type DecodeError, type Stale, ok, err } from "./result.js";
-export { Unknown, __unknown } from "./unknown.js";
+export { Unknown, __unknown, __unknownAsync } from "./unknown.js";
 export { Int64 } from "./int64.js";
 export { Decimal } from "./decimal.js";
 export { Zoned } from "./zoned.js";
@@ -16,5 +16,14 @@ export {
   type ObjectShape,
   type Encoded,
 } from "./decoder.js";
-export { __latest, type Latest, type LatestFork, type LatestCall, type LatestOptions } from "./latest.js";
+export {
+  __latest,
+  __latestFor,
+  type Latest,
+  type LatestFork,
+  type LatestCall,
+  type LatestOptions,
+  type LatestArgs,
+  type LatestReturn,
+} from "./latest.js";
 export { fetch, type SeamResponse } from "./fetch.js";

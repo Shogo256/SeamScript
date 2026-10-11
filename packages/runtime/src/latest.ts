@@ -43,6 +43,39 @@ export function __latest(fn: AnyFn, options?: LatestOptions): Latest<any[], Resu
   return Object.assign(root.call, { fork: root.fork });
 }
 
+const declared = new WeakMap<AnyFn, Latest<any[], Result<unknown, unknown>>>();
+
+/**
+ * Compiled form of a `latest async function` declaration. The emitted function
+ * declaration stays hoisted like the original, so its wrapper cannot live in a
+ * module-level const; it is created on first call and cached per implementation.
+ */
+export function __latestFor<A extends unknown[], R extends Result<unknown, unknown>>(
+  fn: (...args: A) => Promise<R>,
+): Latest<A, R>;
+export function __latestFor<A extends unknown[], R extends Result<unknown, unknown>>(
+  fn: (...args: [...A, AbortSignal]) => Promise<R>,
+  options: LatestOptions,
+): Latest<A, R>;
+export function __latestFor(fn: AnyFn, options?: LatestOptions): Latest<any[], Result<unknown, unknown>> {
+  let l = declared.get(fn);
+  if (l === undefined) {
+    const root = line(fn, options?.signal);
+    l = Object.assign(root.call, { fork: root.fork });
+    declared.set(fn, l);
+  }
+  return l;
+}
+
+/** Parameters of a compiled latest function: the implementation's, minus a trailing AbortSignal. */
+export type LatestArgs<F extends (...args: any[]) => unknown, HasSignal extends boolean> = HasSignal extends true
+  ? Parameters<F> extends [...infer A, unknown]
+    ? A
+    : never
+  : Parameters<F>;
+
+export type LatestReturn<F extends (...args: any[]) => unknown> = Promise<Awaited<ReturnType<F>> | Stale>;
+
 function line(fn: AnyFn, signalIndex: number | undefined) {
   let generation = 0;
   let controller: AbortController | undefined;

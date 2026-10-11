@@ -359,21 +359,58 @@ function object<T extends object>(shape: ObjectShape<T>): ObjectDecoder<T> {
   );
 }
 
+type Members = () => readonly ObjectDecoder<object>[];
+
+function literalValues(m: ObjectDecoder<object>, key: string): readonly (string | number)[] | undefined {
+  const d = (m.shape as Record<string, Decoder<unknown>>)[key] as Partial<LiteralDecoder<string | number>> | undefined;
+  return d?.values;
+}
+
+/** The first field of the first member that is a literal in every member, with no value shared between members. */
+function findDiscriminant(members: readonly ObjectDecoder<object>[]): string | undefined {
+  const [first] = members;
+  if (first === undefined) return undefined;
+  candidates: for (const key of Object.keys(first.shape)) {
+    const seen = new Set<string | number>();
+    for (const m of members) {
+      const values = literalValues(m, key);
+      if (values === undefined) continue candidates;
+      for (const v of values) {
+        if (seen.has(v)) continue candidates;
+        seen.add(v);
+      }
+    }
+    return key;
+  }
+  return undefined;
+}
+
 /**
  * A discriminated union of boundaries. Each member must have a literal field
- * `key` whose values no other member uses. Members are passed as a thunk so a
- * union can be declared before the boundaries it names.
+ * whose values no other member uses; without an explicit `key`, the first such
+ * field is used. Members are passed as a thunk so a union can be declared before
+ * the boundaries it names.
  */
-function union<T extends object>(key: string, members: () => readonly ObjectDecoder<object>[]): Decoder<T> {
+function union<T extends object>(members: Members): Decoder<T>;
+function union<T extends object>(key: string, members: Members): Decoder<T>;
+function union<T extends object>(keyOrMembers: string | Members, maybeMembers?: Members): Decoder<T> {
+  const members = typeof keyOrMembers === "string" ? maybeMembers! : keyOrMembers;
+  let key = typeof keyOrMembers === "string" ? keyOrMembers : "";
   let table: Map<string | number, ObjectDecoder<object>> | undefined;
   let expectedTag = "";
   const build = (): Map<string | number, ObjectDecoder<object>> => {
     if (table !== undefined) return table;
+    const all = members();
+    if (typeof keyOrMembers !== "string") {
+      const found = findDiscriminant(all);
+      if (found === undefined) throw new TypeError("Union members have no literal field with distinct values");
+      key = found;
+    }
     const t = new Map<string | number, ObjectDecoder<object>>();
-    for (const m of members()) {
-      const tag = (m.shape as Record<string, Decoder<unknown>>)[key] as Partial<LiteralDecoder<string | number>> | undefined;
-      if (tag?.values === undefined) throw new TypeError(`Union member has no literal field "${key}"`);
-      for (const lit of tag.values) {
+    for (const m of all) {
+      const values = literalValues(m, key);
+      if (values === undefined) throw new TypeError(`Union member has no literal field "${key}"`);
+      for (const lit of values) {
         if (t.has(lit)) throw new TypeError(`Union members overlap on ${key} = ${JSON.stringify(lit)}`);
         t.set(lit, m);
       }
@@ -394,8 +431,9 @@ function union<T extends object>(key: string, members: () => readonly ObjectDeco
       return member[RUN](v, depth) as Step<T>;
     },
     (value) => {
+      const t = build(); // sets `key` when it is detected
       const tag = (value as Record<string, unknown>)[key];
-      const member = typeof tag === "string" || typeof tag === "number" ? build().get(tag) : undefined;
+      const member = typeof tag === "string" || typeof tag === "number" ? t.get(tag) : undefined;
       if (member === undefined) throw new TypeError(`No union member for ${key} = ${String(tag)}`);
       return member[WRITE](value);
     },

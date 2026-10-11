@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { __b, __decode, __latest, type DecodeError, err, fetch, ok, type Result } from "../src/index.js";
+import { __b, __decode, __latest, __latestFor, type DecodeError, err, fetch, ok, type Result } from "../src/index.js";
 
 const STALE = { ok: false, error: { kind: "stale" } };
 
@@ -224,6 +224,18 @@ describe("search race (spec milestone demo)", () => {
     release("ab");
     await Promise.all(typing);
     expect(screen).toBe("abc");
+  });
+});
+
+describe("__latestFor (compiled latest declarations)", () => {
+  it("creates one wrapper per implementation, on first use", async () => {
+    async function impl(q: string) {
+      return ok(q);
+    }
+    const a = __latestFor(impl);
+    expect(__latestFor(impl)).toBe(a);
+    expect(await a("x")).toEqual({ ok: true, value: "x" });
+    expect(typeof a.fork().cancel).toBe("function");
   });
 });
 

@@ -36,19 +36,73 @@
 - optional のフィールドに自分のプロパティとして `undefined` が入っていたら（postMessage 経由）、キーが無いのと同じに扱う。
 - `Decoder` の内部書き出しはメソッド構文にしてある。これで `Decoder<Order>` を `Decoder<unknown>` として扱える（union のメンバーやデコーダの配列）。
 
+## コンパイラで決めたこと
+
+### パーサ（`packages/parser`）
+
+- 仕様どおり `@babel/parser` を fork した（8.0.7）。ただし TS プラグインには手を入れず、`src/plugins/seamscript.ts` という新しい mixin を足して、`plugin-utils.ts` で登録するだけにした。upstream との差分はこの1ファイルと数行。追従手順は `packages/parser/UPSTREAM.md`。
+- **fork が既存の TS の意味を変えていないこと**を、差分テストで確認している。upstream の約 6,000 のフィクスチャを、公開版 `@babel/parser@8.0.7` と fork の両方でパースし、AST と エラーが完全に一致すること。さらに TS のフィクスチャ約 700 については、seamscript プラグインを有効にしても一致すること。`errorRecovery` の有無の両方で比べている。
+- `boundary` / `decode` / `latest` は、TS では構文エラーになる形（キーワードの直後に、同じ行で別の名前が続く）のときだけ構文として認識する。ただし直後が `as` / `satisfies` / `of` のときは普通の識別子のまま（`decode as T` は有効な TS なので）。
+- `decode` の型の直後に `(` は書けない。`decode (A | null)[] from v` は関数呼び出し `decode(...)` と区別できないため。
+- `export boundary` / `export latest` だけが export になる。仕様の出力例では export のない `boundary Order` が `export type` / `export const` になっているが、TS の他の宣言と同じく、明示したときだけ export する。
+
+### 変換（`packages/compiler/src/transform.ts`）
+
+- 出力は元のテキストに編集を差し込む形で作る（magic-string）。5構文以外は、コメントや書式も含めて1バイトも変わらない。ソースマップは1つだけ。checker の `__unknown(...)` で包む箇所も元のソースの座標で同じ変換に入れるので、仕様の「2段のソースマップ」は1段になる。
+- boundary の定数には型注釈を付ける（`const Order: ObjectDecoder<Order> = ...`。前回の記録どおり）。
+- boundary のフィールドからほかの boundary を参照するとき：同じファイルで先に宣言されていれば直接参照し、それ以外（自分自身、後で宣言されるもの、import したもの）は `__b.lazy(() => X)` にする。import の循環でも、初期化前の参照（TDZ）にならない。
+- union boundary の判別フィールドは、ランタイムが初回使用時に自分で探す（`__b.union<T>(() => [A, B])`）。コンパイラは型情報なしで動くので、別ファイルのメンバーの中身を知らない。メンバーが全部同じファイルにあるときは、コンパイル時にも判別フィールドを検査する（SEAM1105）。
+- `latest` の出力は次の3つ。`function f(...args) { return __latestFor(f__impl, opts).apply(undefined, args) }`、`f.fork = ...`、`async function f__impl(...)`。spread でなく `apply` にしたのは、checker が Unknown の spread を禁じており、latest 関数が Unknown を引数に取るのは正当なため。
+- signal の有無は構文で判定する。最後の引数の型注釈が `AbortSignal` という名前かどうか。型の別名を経由した `AbortSignal` は検出できない。
+- 自動で import するランタイムの名前は2種類。値は `Text` / `Int64` / `Decimal` / `Zoned` / `Unknown` / `fetch`、型は `Result` / `Ok` / `Err` / `DecodeError` / `Stale`。そのファイルが同じ名前を自分で束縛していない（import も宣言もしていない）ときだけ足す。`ok` / `err` は名前が一般的すぎるので、自動では import しない。
+- `seamc build` の出力は、ファイル名を `x.seam.ts` のまま変えない。中身は素の TS だが、ほかのファイルの `import "./x.seam"` が書き換えなしで解決できる。
+- decode の対象には、組み込み型、boundary 名、`T[]` に加えて、`T | null` とリテラル型も書ける（未決だった3を解決）。
+
+### checker パス（`packages/compiler/src/checker.ts`）
+
+- TypeChecker API を使うのはこの1ファイルだけ（未決だった4を解決）。使っている API は、`getSymbolAtLocation`、`getTypeAtLocation`、`getContextualType`、`getResolvedSignature`、`getTypeArguments`、`getPropertiesOfType`、`getTypeOfSymbol`、`isTypeAssignableTo`、`isTupleType`、`isArrayLikeType`、`getIndexTypeOfType`、`getAwaitedType`、`getExportsOfModule`、`getAliasedSymbol`、`getDeclaredTypeOfSymbol`。`typescript` は 5.9.3 に固定している。
+- 発生源は TS の lib の宣言で判定する。対象は `Body.json`（Response と Request）、`JSON.parse`、`Storage.getItem`、`URLSearchParams.get` / `getAll`、`MessageEvent.data`（postMessage、WebSocket、BroadcastChannel）。DOM の入力値は対象にしない。改訂版4節に従ったもので、コンパイル手順3(a)の一覧は古い。
+- 発生源のプロパティを分割代入で取り出すこと（`const { data } = e`）は、追跡せずエラーにする（SEAM2004）。束縛要素を Unknown 型に置き換える方法がないため。
+- 流出検査は許可リスト方式。Unknown を含む式が流れ込んでよいのは、`decode`、`Unknown.log`、それから流入先の文脈型でも同じ位置に Unknown が残る場所だけ。エラーになるのは、`as`、unknown / any / {} / object / `Object` への代入、型のない関数への引数、`throw`、テンプレート文字列、`+` による連結、`in` 演算子、それに Unknown を消す先への spread。`in` を入れたのは、`"id" in v` で `{ id: unknown }` に絞り込まれて、decode を経ずに抜けられるため。
+- 「Unknown を受け取って any / unknown / {} / object を返す呼び出し」はエラーにする（SEAM2002）。未決だった2を解決し、`launder<T>(x: T): unknown` 経由の抜け道も塞いだ。
+- TypeScript 自体が代入を拒否する場合（Unknown は string に代入できない、など）は、TS のエラーに任せて重複して報告しない。ただし `as` は例外で、TS2352 と SEAM2001 の両方が出る。
+- Text の `length` と添字の読み出し、それから UTF-16 単位のメソッドを呼ばずに参照することは、エラーにする（SEAM2101。未決だった1を解決）。メソッドの呼び出しは TS がもともと拒否する。
+- `JSON.stringify` の検査は、引数の型に bigint を含むときだけにした（SEAM2201）。Text / Decimal / Zoned は実行時にはただの文字列なので、壊れない。
+
+### 診断コード
+
+| コード | 内容 |
+|---|---|
+| SEAM1000 | 構文エラー |
+| SEAM1101 | boundary を越えられない型 |
+| SEAM1102 | boundary はモジュールの最上位にしか書けない |
+| SEAM1103 | boundary に書けるのはフィールドだけ |
+| SEAM1104 | union boundary のメンバーは boundary 名だけ |
+| SEAM1105 | union のメンバーに判別フィールドがない |
+| SEAM1106 | boundary でない型を、boundary として参照した |
+| SEAM1301 | `Text<NFC>` / `Text<NFD>` 以外の Text |
+| SEAM1401 | latest 関数はジェネレータにできない |
+| SEAM2001 | Unknown が decode 以外の出口へ流れた |
+| SEAM2002 | Unknown を受け取って any / unknown を返す呼び出し |
+| SEAM2003 | 発生源のメソッドを、呼び出さずに参照した |
+| SEAM2004 | 発生源のプロパティを分割代入した |
+| SEAM2101 | Text への UTF-16 単位のアクセス |
+| SEAM2201 | bigint を含む値を JSON.stringify に渡した |
+
 ## 検証で分かったこと
 
 - `latest` の「画面が戻らない」は、**呼び出し側が `await` の直後の最初の継続で結果を反映する場合に限って**保証される。結果を受け取ったあと反映する前に、もう一度 `await` すると順序は保証されない。TLC で、配送が FIFO でなければ反例が出ることを確認した（`spec/latest_unordered.cfg`）。README に書くべきこと。コンパイラの警告にもできる。
 - 正規化済みのテキストをグラフェム境界で切った断片は、正規化されたままになる。プロパティテストで NFC と NFD の両方を確認した。`Text.slice` / `at` / `graphemes` は正規化し直さない。
+- 仕様の出力例 `export const Order = __b.object<Order>({...})` は、再帰する boundary だと TS7022 になる（前回の記録）。
 
 ## 未決
 
-### コンパイラ側（ランタイムには影響しない）
+### コンパイラの既知の制限
 
-1. `Text` の `length` と添字の読み出しは、型の上では `never` になるだけでエラーにならない。checker に「Text への UTF-16 メンバーのアクセスはエラー」という規則を足す（`test/types.check.ts` に現状を固定してある）。
-2. `function launder<T>(x: T): unknown` を経由した抜け道。戻り値に `any` を含むものだけでなく、`unknown` / `{}` / `object` を返す呼び出しにも Unknown を渡せないようにする。
-3. `Storage.getItem` / `URLSearchParams.get` を発生源に残すなら、decode の対象に `T | null` も書けるようにする（ランタイムでは `__b.nullable` で表現できる）。
-4. 「TS の API を4つに絞る」は現実的でない。`getResolvedSignature` / `getContextualType` / `getAliasedSymbol` が必要になる。checker API を1つのモジュールに閉じ込める方針にする。
+- ジェネリックな `latest` 関数は、公開側のシグネチャで型引数を失う（`Parameters<typeof f__impl>` が unknown で具体化される）。
+- `Text<NFC>` の書き換えは、名前が `Text` の型参照すべてに適用する。そのファイルが別の `Text` を import していても書き換えてしまう。
+- 一度目の program は発生源を見つけるためだけに作っている。チェックの時間は素の tsc の約2倍。
+- 既存の `.ts` ファイルから来る `any` は検査の対象外（仕様の「既存コードの境界は守れない」）。
 
 ### 仕様書の文言
 

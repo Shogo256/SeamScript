@@ -5,6 +5,7 @@
     "packages/*"
   ],
   "scripts": {
-    "test": "yarn workspaces run test"
+    "build": "yarn workspace @seamscript/runtime build && yarn workspace @seamscript/parser build && yarn workspace @seamscript/compiler build",
+    "test": "yarn -s build && yarn workspaces run test"
   }
 }

@@ -1,0 +1,36 @@
+{
+  "name": "@seamscript/parser",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Fork of @babel/parser 8.0.7 that adds SeamScript syntax: boundary, decode … from, latest",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./typings/babel-parser.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "typings",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "fixtures": "sh scripts/fetch-fixtures.sh",
+    "test": "yarn -s build && sh scripts/fetch-fixtures.sh && vitest run"
+  },
+  "dependencies": {
+    "@babel/types": "8.0.6"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@babel/helper-string-parser": "8.0.6",
+    "@babel/helper-validator-identifier": "8.0.6",
+    "@babel/parser": "8.0.7",
+    "charcodes": "0.2.1",
+    "esbuild": "0.28.2",
+    "vite": "8.3.4",
+    "vitest": "5.0.3"
+  }
+}
