@@ -1,0 +1,10 @@
+{
+  "name": "seamscript-monorepo",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "test": "yarn workspaces run test"
+  }
+}

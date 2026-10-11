@@ -1,0 +1,300 @@
+import { describe, expect, it } from "vitest";
+import {
+  __b,
+  __decode,
+  type Decimal,
+  type Decoder,
+  EncodeRangeError,
+  type Int64,
+  MAX_DEPTH,
+  type ObjectDecoder,
+  type Text,
+  type Zoned,
+} from "../src/index.js";
+
+// The spec's example boundary, in the form the compiler emits.
+type Order = {
+  id: Int64;
+  memo: Text<"NFC">;
+  total: Decimal;
+  placedAt: Zoned;
+  tags?: string[];
+  parent: Order | null;
+};
+const Order: ObjectDecoder<Order> = __b.object<Order>({
+  id: __b.int64,
+  memo: __b.text("NFC"),
+  total: __b.decimal,
+  placedAt: __b.zoned,
+  tags: __b.optional(__b.array(__b.string)),
+  parent: __b.nullable(__b.lazy(() => Order)),
+});
+
+const valid = {
+  id: 1,
+  memo: "café",
+  total: "12.50",
+  placedAt: "2026-10-11T22:33:16+09:00",
+  tags: ["a", "b"],
+  parent: null,
+};
+
+describe("object", () => {
+  it("decodes the spec example and normalizes builtin types", () => {
+    const r = __decode(Order, valid);
+    expect(r).toEqual({
+      ok: true,
+      value: {
+        id: 1n,
+        memo: "café",
+        total: "12.5",
+        placedAt: "2026-10-11T22:33:16+09:00",
+        tags: ["a", "b"],
+        parent: null,
+      },
+    });
+  });
+
+  it("reports the path, the expectation and what arrived", () => {
+    const r = __decode(Order, { ...valid, id: "6f1c0e3a-uuid" });
+    expect(r).toEqual({
+      ok: false,
+      error: { kind: "decode", path: ["id"], expected: "int64", actual: "string (not a canonical int64)" },
+    });
+  });
+
+  it("reports nested paths through recursion and arrays", () => {
+    const r = __decode(Order, { ...valid, parent: { ...valid, tags: ["x", 2] } });
+    expect(r.ok === false && r.error).toMatchObject({ path: ["parent", "tags", "1"], expected: "string", actual: "number" });
+  });
+
+  it("reports missing fields", () => {
+    const { total: _, ...rest } = valid;
+    const r = __decode(Order, rest);
+    expect(r.ok === false && r.error).toMatchObject({ path: ["total"], actual: "missing" });
+  });
+
+  it("drops keys that are not in the shape", () => {
+    const r = __decode(Order, { ...valid, extra: true, nested: { a: 1 } });
+    expect(r.ok && Object.keys(r.value)).toEqual(["id", "memo", "total", "placedAt", "tags", "parent"]);
+  });
+
+  it("lets optional keys be absent but not null", () => {
+    const { tags: _, ...noTags } = valid;
+    const absent = __decode(Order, noTags);
+    expect(absent.ok && "tags" in absent.value).toBe(false);
+    const nulled = __decode(Order, { ...valid, tags: null });
+    expect(nulled.ok === false && nulled.error).toMatchObject({ path: ["tags"], expected: "string[]", actual: "null" });
+  });
+
+  it("treats an own undefined as absent for optional keys", () => {
+    expect(__decode(Order, { ...valid, tags: undefined }).ok).toBe(true);
+  });
+
+  it("says null was acceptable when a nullable field mismatches", () => {
+    const r = __decode(Order, { ...valid, parent: "none" });
+    expect(r.ok === false && r.error).toMatchObject({ path: ["parent"], expected: "object | null", actual: "string" });
+  });
+
+  it("rejects non-objects at the top level with an empty path", () => {
+    for (const [input, actual] of [
+      [null, "null"],
+      [[], "array"],
+      ["{}", "string"],
+      [undefined, "undefined"],
+    ] as const) {
+      expect(__decode(Order, input)).toEqual({
+        ok: false,
+        error: { kind: "decode", path: [], expected: "object", actual },
+      });
+    }
+  });
+
+  it("reads own properties only", () => {
+    type C = { constructor: string; toString: string };
+    const C = __b.object<C>({ constructor: __b.string, toString: __b.string });
+    const r = __decode(C, { toString: "x" });
+    expect(r.ok === false && r.error).toMatchObject({ path: ["constructor"], actual: "missing" });
+  });
+
+  it("does not let a __proto__ key touch the prototype", () => {
+    type P = { __proto__: string };
+    const P = __b.object<P>({ ["__proto__"]: __b.string } as never);
+    const input = JSON.parse('{"__proto__": "payload"}') as unknown;
+    const r = __decode(P, input);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(Object.getPrototypeOf(r.value)).toBe(Object.prototype);
+      expect(Object.getOwnPropertyDescriptor(r.value, "__proto__")?.value).toBe("payload");
+    }
+    // An extra "__proto__" key on input is simply dropped.
+    const extra = __decode(Order, JSON.parse(`{"__proto__": {"polluted": true}, ${JSON.stringify(valid).slice(1)}`));
+    expect(extra.ok && Object.getPrototypeOf(extra.value)).toBe(Object.prototype);
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  });
+
+  it("turns throwing getters into a decode failure", () => {
+    const input = {
+      ...valid,
+      get total(): string {
+        throw new Error("boom");
+      },
+    };
+    const r = __decode(Order, input);
+    expect(r.ok === false && r.error).toMatchObject({ path: ["total"], actual: "unreadable" });
+  });
+});
+
+describe("depth limit", () => {
+  // `levels` nested objects and arrays in total: each order without tags is one level.
+  function chain(levels: number): unknown {
+    const { tags: _, ...leaf } = valid;
+    let node: unknown = null;
+    for (let i = 0; i < levels; i++) node = { ...leaf, parent: node };
+    return node;
+  }
+
+  it("decodes nesting up to the limit and no further", () => {
+    expect(__decode(Order, chain(MAX_DEPTH)).ok).toBe(true);
+    const r = __decode(Order, chain(MAX_DEPTH + 1));
+    expect(r.ok === false && r.error).toMatchObject({ expected: `nesting depth <= ${MAX_DEPTH}`, actual: "deeper nesting" });
+    expect(r.ok === false && r.error.path.length).toBe(MAX_DEPTH);
+  });
+
+  it("fails instead of overflowing the stack", () => {
+    const r = __decode(Order, chain(100_000));
+    expect(r.ok === false && r.error.expected).toBe(`nesting depth <= ${MAX_DEPTH}`);
+  });
+
+  it("stops on cyclic input (possible through postMessage)", () => {
+    const cyclic: Record<string, unknown> = { ...valid };
+    cyclic.parent = cyclic;
+    expect(__decode(Order, cyclic).ok).toBe(false);
+  });
+});
+
+describe("primitives and builtin types as decode targets", () => {
+  it("decodes arrays of builtin types", () => {
+    expect(__decode(__b.array(__b.int64), [1, "2", "-3"])).toEqual({ ok: true, value: [1n, 2n, -3n] });
+  });
+
+  it("rejects non-finite numbers", () => {
+    expect(__decode(__b.number, Number.NaN)).toMatchObject({ ok: false, error: { actual: "number (non-finite)" } });
+    expect(__decode(__b.number, Infinity).ok).toBe(false);
+    expect(__decode(__b.number, -0)).toEqual({ ok: true, value: -0 });
+  });
+
+  it("decodes boolean, null and string strictly", () => {
+    expect(__decode(__b.boolean, 0).ok).toBe(false);
+    expect(__decode(__b.null, undefined).ok).toBe(false);
+    expect(__decode(__b.string, new String("x")).ok).toBe(false);
+  });
+
+  it("shows the received value on literal mismatches", () => {
+    const status = __b.literal("paid", "open", 3);
+    expect(__decode(status, "open")).toEqual({ ok: true, value: "open" });
+    expect(__decode(status, 3)).toEqual({ ok: true, value: 3 });
+    expect(__decode(status, "pending")).toEqual({
+      ok: false,
+      error: { kind: "decode", path: [], expected: '"paid" | "open" | 3', actual: '"pending"' },
+    });
+    expect(__decode(status, "3")).toMatchObject({ ok: false, error: { actual: '"3"' } });
+    expect(__decode(status, "x".repeat(41))).toMatchObject({ ok: false, error: { actual: "string" } });
+  });
+});
+
+describe("union", () => {
+  type Paid = { kind: "paid"; amount: Decimal };
+  type Refunded = { kind: "refunded" | "voided"; reason: string };
+  type PaymentEvent = Paid | Refunded;
+  const PaymentEvent: Decoder<PaymentEvent> = __b.union<PaymentEvent>("kind", () => [Paid, Refunded]);
+  const Paid: ObjectDecoder<Paid> = __b.object<Paid>({ kind: __b.literal("paid"), amount: __b.decimal });
+  const Refunded: ObjectDecoder<Refunded> = __b.object<Refunded>({
+    kind: __b.literal("refunded", "voided"),
+    reason: __b.string,
+  });
+
+  it("dispatches on the discriminant", () => {
+    expect(__decode(PaymentEvent, { kind: "paid", amount: "1.0" })).toEqual({
+      ok: true,
+      value: { kind: "paid", amount: "1" },
+    });
+    expect(__decode(PaymentEvent, { kind: "voided", reason: "dup" })).toEqual({
+      ok: true,
+      value: { kind: "voided", reason: "dup" },
+    });
+  });
+
+  it("reports unknown and missing discriminants at the discriminant's path", () => {
+    expect(__decode(PaymentEvent, { kind: "chargeback" })).toEqual({
+      ok: false,
+      error: { kind: "decode", path: ["kind"], expected: '"paid" | "refunded" | "voided"', actual: '"chargeback"' },
+    });
+    expect(__decode(PaymentEvent, {})).toMatchObject({ ok: false, error: { path: ["kind"], actual: "missing" } });
+  });
+
+  it("reports member field errors under the member's paths", () => {
+    expect(__decode(PaymentEvent, { kind: "paid", amount: 1 })).toMatchObject({
+      ok: false,
+      error: { path: ["amount"], expected: "decimal", actual: "number" },
+    });
+  });
+
+  it("encodes through the matching member", () => {
+    expect(PaymentEvent.encode({ kind: "refunded", reason: "r", extra: 1 } as Refunded)).toEqual({
+      kind: "refunded",
+      reason: "r",
+    });
+  });
+
+  it("rejects overlapping members when first used", () => {
+    const A = __b.object<{ t: "a" }>({ t: __b.literal("a") });
+    const B = __b.object<{ t: "a" | "b" }>({ t: __b.literal("a", "b") });
+    const AB = __b.union<{ t: "a" } | { t: "a" | "b" }>("t", () => [A, B]);
+    expect(() => __decode(AB, { t: "a" })).toThrow(TypeError);
+  });
+});
+
+describe("encode", () => {
+  const order: Order = {
+    id: 9_007_199_254_740_993n,
+    memo: "café" as Text<"NFC">,
+    total: "12.5" as Decimal,
+    placedAt: "2026-10-11T22:33:16+09:00" as Zoned,
+    parent: {
+      id: -1n,
+      memo: "" as Text<"NFC">,
+      total: "0" as Decimal,
+      placedAt: "2026-01-01T00:00:00Z" as Zoned,
+      tags: [],
+      parent: null,
+    },
+  };
+
+  it("produces JSON-ready values that decode back to the same thing", () => {
+    const encoded = Order.encode(order);
+    expect(encoded.id).toBe("9007199254740993");
+    expect("tags" in encoded).toBe(false);
+    const back = __decode(Order, JSON.parse(JSON.stringify(encoded)));
+    expect(back).toEqual({ ok: true, value: order });
+  });
+
+  it("only writes declared keys", () => {
+    const withExtra = { ...order, secret: "x" } as Order;
+    expect(Object.keys(Order.encode(withExtra))).not.toContain("secret");
+  });
+
+  it("throws EncodeRangeError with a path when an Int64 left the 64-bit range", () => {
+    const overflow: Order = { ...order, parent: { ...order.parent!, id: 2n ** 63n } };
+    let caught: unknown;
+    try {
+      Order.encode(overflow);
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(EncodeRangeError);
+    expect(caught).toBeInstanceOf(RangeError);
+    expect((caught as EncodeRangeError).path).toEqual(["parent", "id"]);
+    expect((caught as EncodeRangeError).message).toBe('Int64 out of range at ["parent","id"]');
+  });
+});
