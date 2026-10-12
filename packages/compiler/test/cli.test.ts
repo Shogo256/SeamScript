@@ -35,11 +35,32 @@ it("build: writes plain TypeScript under the same file name", () => {
   vi.restoreAllMocks();
 });
 
+it("build --production imports the WASM core, and type-checks against it", () => {
+  quiet();
+  const [file] = project({ "src/order.seam.ts": "export const t = Text.nfc('x');\n" });
+  const outDir = join(dirname(file!), "..", "out-prod");
+  expect(main(["build", "--production", "--outDir", outDir, file!])).toBe(0);
+  expect(readFileSync(join(outDir, "order.seam.ts"), "utf8").split("\n")[0]).toBe('import "@seamscript/core";');
+  vi.restoreAllMocks();
+});
+
 it("usage errors exit 2", () => {
   quiet();
   expect(main([])).toBe(2);
   expect(main(["build", "x.seam.ts"])).toBe(2);
   vi.restoreAllMocks();
+});
+
+it("vite plugin: imports the WASM core in builds, not on the dev server, unless told otherwise", () => {
+  const output = (command: "build" | "serve", core?: boolean) => {
+    const plugin = seamscript({ core });
+    (plugin.configResolved as (c: object) => void)({ command, mode: "staging" });
+    return (plugin.transform as (code: string, id: string) => { code: string }).call({}, "fetch(u);", "/a.seam.ts").code;
+  };
+  expect(output("build")).toContain('import "@seamscript/core";');
+  expect(output("serve")).not.toContain("@seamscript/core");
+  expect(output("build", false)).not.toContain("@seamscript/core");
+  expect(output("serve", true)).toContain('import "@seamscript/core";');
 });
 
 it("vite plugin: compiles .seam.ts modules and leaves others", () => {

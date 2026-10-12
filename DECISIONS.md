@@ -97,11 +97,23 @@
 - CI のワークフロー（`.github/workflows/comparison-demo.yml`）は書いただけで、リモートがないため GitHub 上では動かしていない。同じコマンドはローカルで実行し、`yarn install --frozen-lockfile` が通ることも確認した。
 - ルートの `yarn test` には `yarn demo` も含めた。デモが想定どおりの分かれ方をしなくなったら、テスト全体が失敗する。
 
+## WASM コアで決めたこと（`packages/core`）
+
+- **Unicode 17.0.0 に固定**：`unicode-segmentation 1.13.3` と `unicode-normalization 0.1.25` をバージョン指定 `=` で固定した。両者の Unicode バージョンが一致することは、コンパイル時の assert で確かめている。
+- **wasm-bindgen は使わない**：仕様の「wasm-bindgen で公開」からの変更。C ABI の関数7つと、手書きの JS（`js/core.ts`）にした。wasm-bindgen は CLI とクレートのバージョンを完全に揃える必要があり、その CLI は開発シェルにない。公開するのは文字列を受け取る関数2つ（正規化とグラフェム境界）だけなので、生成されるグルーより手書きのほうが短い。
+- **ネイティブでも使えるクレート**：`seamscript-core`（crates.io）の `normalize` / `grapheme_boundaries_utf16` / `UNICODE_VERSION` は、ネイティブの Rust からもそのまま使える。バックエンドが同じクレートの同じバージョンを使えば、「1文字」の定義が一致する。
+- **WASM は base64 で JS に埋め込む**：WASM は 183KB（gzip で 86KB）、埋め込んだ JS は 244KB になる。`new URL("x.wasm", import.meta.url)` で別ファイルとして読む方式は、Vite の依存の事前バンドルなど、バンドラごとに設定が必要になるため避けた。
+- **`@seamscript/runtime` は peerDependency**：コアがアプリとは別コピーのランタイムに差し込まれると、アプリの Text はコアを使わず、黙ってフォールバックで動いてしまう。peerDependency にして、アプリと同じ実体を使わせる。
+- **本番の判定**：Vite プラグインは、`vite build` ならモードに関係なくコアを import する。`config.isProduction` は NODE_ENV に従うので、テストランナーやステージング用のビルドで判定がずれる。そのため使わない。開発サーバーと Vitest はフォールバックで動く。`seamscript({ core })` で上書きできる。CLI では `seamc build --production` を指定する。`@seamscript/core` が解決できなければビルドは失敗し、型検査の段階でも TS2307 になる。
+- **開発シェルに lld を追加**：nixpkgs の rustc は、wasm32 ターゲットのリンクに `lld` を使う。そのため `shell.nix` に `llvmPackages_19.lld` を足した。CI では rustup の rustc を使い、そちらは rust-lld を同梱しているので、`rustup target add wasm32-unknown-unknown` だけで足りる。
+
 ## 検証で分かったこと
 
 - `latest` の「画面が戻らない」は、**呼び出し側が `await` の直後の最初の継続で結果を反映する場合に限って**保証される。結果を受け取ったあと反映する前に、もう一度 `await` すると順序は保証されない。TLC で、配送が FIFO でなければ反例が出ることを確認した（`spec/latest_unordered.cfg`）。README に書くべきこと。コンパイラの警告にもできる。
 - 正規化済みのテキストをグラフェム境界で切った断片は、正規化されたままになる。プロパティテストで NFC と NFD の両方を確認した。`Text.slice` / `at` / `graphemes` は正規化し直さない。
 - 仕様の出力例 `export const Order = __b.object<Order>({...})` は、再帰する boundary だと TS7022 になる（前回の記録）。
+- **決定性が必要だという実データ**：Node 24.18 の ICU は Unicode 16.0 を実装している。Unicode 17.0 の公式テストデータで比べると、グラフェム分割は 766 件中 10 件、正規化は 20,034 行中 68 行がずれる。WASM コアは全件通る。確かめたのは3つ：GraphemeBreakTest の 766 件をコア単体と Text 経由の両方で、NormalizationTest の 20,034 行を全 Part で、Part 1 の不変条件を全コードポイントで。
+- **公式データのテストで見つかった JS 側のバグ**：`TextDecoder` は既定で、先頭の U+FEFF を BOM とみなして捨てる。そのため、U+FEFF で始まる Text が1文字欠けていた。`ignoreBOM: true` で直し、回帰テストも足した。
 
 ## 未決
 

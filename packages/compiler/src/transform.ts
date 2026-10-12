@@ -20,6 +20,7 @@ import { type BoundaryInfo, type DecoderScope, decoderFor, objectDecoder, textFo
 import { Codes, type Diagnostic, lineColumn } from "./diagnostics.js";
 
 export const RUNTIME_MODULE = "@seamscript/runtime";
+export const CORE_MODULE = "@seamscript/core";
 
 /** Runtime names a `.seam.ts` file may use without importing them (when it does not bind them itself). */
 const AMBIENT_VALUES = ["Decimal", "Int64", "Text", "Unknown", "Zoned", "fetch"];
@@ -38,6 +39,12 @@ export interface UnknownWrap {
 
 export interface TransformOptions {
   wraps?: readonly UnknownWrap[];
+  /**
+   * Production output also imports `@seamscript/core`, whose top-level await
+   * installs the WASM core before this module runs, so Text is deterministic.
+   * Development output runs on the host's ICU instead (Text.deterministic is false).
+   */
+  production?: boolean;
 }
 
 export interface TransformResult {
@@ -224,12 +231,16 @@ export function transform(source: string, fileName: string, options: TransformOp
     ...[...helperTypes].sort().map((n) => `type ${n} as __${n}`),
     ...[...usedAmbient].filter((n) => AMBIENT_TYPES.includes(n)).sort().map((n) => `type ${n}`),
   ];
-  if (specifiers.length > 0) {
-    const line = `import { ${specifiers.join(", ")} } from "${RUNTIME_MODULE}";`;
+  const imports = [
+    ...(options.production ? [`import "${CORE_MODULE}";`] : []),
+    ...(specifiers.length > 0 ? [`import { ${specifiers.join(", ")} } from "${RUNTIME_MODULE}";`] : []),
+  ];
+  if (imports.length > 0) {
+    const lines = imports.join("\n");
     // After a hashbang and directive prologue ("use client"), which must stay first.
     const after = program.directives.at(-1) ?? program.interpreter;
-    if (after) s.appendLeft(end(after), `\n${line}`);
-    else s.prepend(`${line}\n`);
+    if (after) s.appendLeft(end(after), `\n${lines}`);
+    else s.prepend(`${lines}\n`);
   }
 
   return {

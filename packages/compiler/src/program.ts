@@ -37,10 +37,16 @@ function seamHost(host: ts.CompilerHost, transformed: (fileName: string) => Tran
   };
 }
 
+export interface SeamProgramOptions {
+  /** Transform for production: every `.seam.ts` file imports `@seamscript/core`. */
+  production?: boolean;
+}
+
 export function createSeamProgram(
   rootNames: readonly string[],
   options: ts.CompilerOptions,
   host: ts.CompilerHost = ts.createCompilerHost(options),
+  { production = false }: SeamProgramOptions = {},
 ): SeamProgram {
   const originals = new Map<string, string | undefined>();
   const original = (fileName: string) => {
@@ -54,7 +60,7 @@ export function createSeamProgram(
     if (!first.has(f)) {
       const source = original(f);
       if (source === undefined) return undefined;
-      first.set(f, transform(source, f));
+      first.set(f, transform(source, f, { production }));
     }
     return first.get(f);
   });
@@ -87,7 +93,7 @@ export function createSeamProgram(
       else {
         const source = original(f);
         if (source === undefined) return undefined;
-        outputs.set(f, transform(source, f, { wraps: w }));
+        outputs.set(f, transform(source, f, { wraps: w, production }));
       }
     }
     return outputs.get(f);

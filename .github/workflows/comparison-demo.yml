@@ -33,8 +33,9 @@ jobs:
         with:
           node-version: 24
       - run: npm install -g yarn@1.22.22
+      - run: rustup target add wasm32-unknown-unknown
       - run: yarn install --frozen-lockfile
-      - name: Build runtime, parser and compiler
+      - name: Build runtime, WASM core, parser and compiler
         run: yarn build
       - name: Are the three bugs stopped?
         run: yarn workspace @seamscript-demo/seamscript test
@@ -48,6 +49,7 @@ jobs:
         with:
           node-version: 24
       - run: npm install -g yarn@1.22.22
+      - run: rustup target add wasm32-unknown-unknown
       - run: yarn install --frozen-lockfile
       - run: yarn build
       - run: yarn demo

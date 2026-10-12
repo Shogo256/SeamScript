@@ -1,0 +1,34 @@
+{
+  "name": "@seamscript/core",
+  "version": "0.0.0",
+  "description": "WASM core for SeamScript's Text: grapheme segmentation and normalization at a pinned Unicode version",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./load": {
+      "types": "./dist/load.d.ts",
+      "default": "./dist/load.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "cargo test -q && sh scripts/fetch-ucd.sh && tsc -p tsconfig.json --noEmit && vitest run"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@seamscript/runtime": "0.0.0",
+    "@types/node": "24.19.2",
+    "typescript": "5.9.3",
+    "vite": "8.3.4",
+    "vitest": "5.0.3"
+  },
+  "peerDependencies": {
+    "@seamscript/runtime": "0.0.0"
+  }
+}

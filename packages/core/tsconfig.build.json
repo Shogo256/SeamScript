@@ -1,0 +1,9 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "js",
+    "outDir": "dist",
+    "types": []
+  },
+  "include": ["js"]
+}

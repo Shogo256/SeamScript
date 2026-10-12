@@ -6,8 +6,8 @@
     "demo/*"
   ],
   "scripts": {
-    "build": "yarn workspace @seamscript/runtime build && yarn workspace @seamscript/parser build && yarn workspace @seamscript/compiler build",
-    "test": "yarn -s build && yarn workspace @seamscript/runtime test && yarn workspace @seamscript/parser test && yarn workspace @seamscript/compiler test && yarn -s demo",
+    "build": "yarn workspace @seamscript/runtime build && yarn workspace @seamscript/core build && yarn workspace @seamscript/parser build && yarn workspace @seamscript/compiler build",
+    "test": "yarn -s build && yarn workspace @seamscript/runtime test && yarn workspace @seamscript/core test && yarn workspace @seamscript/parser test && yarn workspace @seamscript/compiler test && yarn -s demo",
     "demo": "node demo/run.mjs"
   }
 }

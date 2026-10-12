@@ -175,6 +175,14 @@ describe("runtime import", () => {
     expect(out).toBe('#!/usr/bin/env node\n"use client";\nimport { fetch } from "@seamscript/runtime";\nfetch(u);');
   });
 
+  it("imports the WASM core first in production output", () => {
+    expect(run("fetch(u);", "a.seam.ts").code).not.toContain("@seamscript/core");
+    expect(transform('"use client";\nfetch(u);', "a.seam.ts", { production: true }).code).toBe(
+      '"use client";\nimport "@seamscript/core";\nimport { fetch } from "@seamscript/runtime";\nfetch(u);',
+    );
+    expect(transform("export const x = 1;", "a.seam.ts", { production: true }).code).toBe('import "@seamscript/core";\nexport const x = 1;');
+  });
+
   it("leaves files without SeamScript features untouched", () => {
     const source = "export const x = 1; // plain TS\n";
     expect(code(source)).toBe(source);

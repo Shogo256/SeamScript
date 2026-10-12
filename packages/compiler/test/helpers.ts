@@ -6,9 +6,12 @@ import { createSeamProgram, defaultCompilerOptions } from "../src/program.js";
 // resolves through the workspace's node_modules.
 export const TMP = new URL("./.tmp/", import.meta.url).pathname;
 let counter = 0;
+// Test files run in parallel; each removes only the projects it created.
+const created: string[] = [];
 
 export function project(files: Record<string, string>): string[] {
   const dir = join(TMP, `p${process.pid}-${counter++}`);
+  created.push(dir);
   return Object.entries(files).map(([name, content]) => {
     const path = join(dir, name);
     mkdirSync(dirname(path), { recursive: true });
@@ -18,7 +21,7 @@ export function project(files: Record<string, string>): string[] {
 }
 
 export function cleanup(): void {
-  rmSync(TMP, { recursive: true, force: true });
+  for (const dir of created.splice(0)) rmSync(dir, { recursive: true, force: true });
 }
 
 export function check(files: Record<string, string>) {

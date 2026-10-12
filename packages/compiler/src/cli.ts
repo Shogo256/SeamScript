@@ -8,10 +8,12 @@ import { isSeamFile, transform } from "./transform.js";
 
 const USAGE = `Usage:
   seamc check [-p tsconfig.json] [files...]      Type-check, including SeamScript's boundary rules
-  seamc build [-p tsconfig.json] --outDir <dir>  Check, then write each .seam.ts as plain TypeScript
+  seamc build [-p tsconfig.json] --outDir <dir> [--production]
+                                                 Check, then write each .seam.ts as plain TypeScript;
+                                                 --production also imports @seamscript/core (WASM)
   seamc transform <file.seam.ts>                 Print the plain TypeScript for one file`;
 
-type Args = { command: string; project?: string; outDir?: string; files: string[] };
+type Args = { command: string; project?: string; outDir?: string; production?: boolean; files: string[] };
 
 function parseArgs(argv: string[]): Args | string {
   const [command, ...rest] = argv;
@@ -21,6 +23,7 @@ function parseArgs(argv: string[]): Args | string {
     const a = rest[i]!;
     if (a === "-p" || a === "--project") args.project = rest[++i];
     else if (a === "--outDir") args.outDir = rest[++i];
+    else if (a === "--production") args.production = true;
     else if (a.startsWith("-")) return `Unknown option ${a}\n\n${USAGE}`;
     else args.files.push(a);
   }
@@ -83,7 +86,7 @@ export function main(argv: string[]): number {
     console.error(ts.formatDiagnostics(configErrors, { getCanonicalFileName: (f) => f, getCurrentDirectory: () => process.cwd(), getNewLine: () => "\n" }));
     return 2;
   }
-  const p = createSeamProgram(rootNames, options);
+  const p = createSeamProgram(rootNames, options, undefined, { production: args.production });
   const diagnostics = p.diagnostics();
   print(diagnostics);
   if (diagnostics.some((d) => d.category === "error")) return 1;

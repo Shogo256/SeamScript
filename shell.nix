@@ -68,6 +68,7 @@ pkgs.mkShell {
     z3
     llvm_19
     llvmPackages_19.clang
+    llvmPackages_19.lld    # wasm-ld: rustc's wasm32-unknown-unknown target links with it (packages/core)
     binutils
     pkg-config
     cmake        # gnumake already comes from stdenv
