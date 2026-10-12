@@ -1,0 +1,5 @@
+// The same feature. `memo.slice(0, 10)` does not compile on Text (it would count
+// UTF-16 code units), so the cut is made in graphemes.
+export function memoPreview(memo: Text<NFC>): string {
+  return Text.length(memo) > 10 ? `${Text.slice(memo, 0, 10)}…` : memo;
+}

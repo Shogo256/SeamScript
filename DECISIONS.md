@@ -89,6 +89,14 @@
 | SEAM2101 | Text への UTF-16 単位のアクセス |
 | SEAM2201 | bigint を含む値を JSON.stringify に渡した |
 
+## 比較デモで決めたこと（`demo/`）
+
+- 両側のテストは、バグ1つにつき1本。どれも「そのバグがユーザーに届く前に止まるか」を確かめる形にした。こうすると、TS 側は3本とも赤、SeamScript 側は3本とも緑になり、仕様の「片方だけが落ちることを CI で示す」をそのまま満たす。
+- バグ1は、両側に拡張子以外まったく同じコードを置いた。SeamScript 側の `load-order.seam.ts` は、わざとコンパイルが通らない。テストでは実行せず、`seamc check` が SEAM2001 を出すことだけを確かめる。
+- 仕様の表にある「`no-unsafe-type-assertion` を有効にすれば止まる」は、実際に確かめた（型情報つき lint で、該当行が error になる）。このルールが入っているのは typescript-eslint の `all` プリセットだけ。
+- CI のワークフロー（`.github/workflows/comparison-demo.yml`）は書いただけで、リモートがないため GitHub 上では動かしていない。同じコマンドはローカルで実行し、`yarn install --frozen-lockfile` が通ることも確認した。
+- ルートの `yarn test` には `yarn demo` も含めた。デモが想定どおりの分かれ方をしなくなったら、テスト全体が失敗する。
+
 ## 検証で分かったこと
 
 - `latest` の「画面が戻らない」は、**呼び出し側が `await` の直後の最初の継続で結果を反映する場合に限って**保証される。結果を受け取ったあと反映する前に、もう一度 `await` すると順序は保証されない。TLC で、配送が FIFO でなければ反例が出ることを確認した（`spec/latest_unordered.cfg`）。README に書くべきこと。コンパイラの警告にもできる。

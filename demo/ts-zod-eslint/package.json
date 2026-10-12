@@ -1,0 +1,21 @@
+{
+  "name": "@seamscript-demo/ts-zod-eslint",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The comparison demo's screen in TypeScript strict + Zod + ESLint",
+  "type": "module",
+  "scripts": {
+    "lint": "tsc --noEmit -p . && eslint src",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "zod": "4.6.6"
+  },
+  "devDependencies": {
+    "eslint": "10.12.0",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.71.1",
+    "vite": "8.3.4",
+    "vitest": "5.0.3"
+  }
+}

@@ -2,10 +2,12 @@
   "name": "seamscript-monorepo",
   "private": true,
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "demo/*"
   ],
   "scripts": {
     "build": "yarn workspace @seamscript/runtime build && yarn workspace @seamscript/parser build && yarn workspace @seamscript/compiler build",
-    "test": "yarn -s build && yarn workspaces run test"
+    "test": "yarn -s build && yarn workspace @seamscript/runtime test && yarn workspace @seamscript/parser test && yarn workspace @seamscript/compiler test && yarn -s demo",
+    "demo": "node demo/run.mjs"
   }
 }

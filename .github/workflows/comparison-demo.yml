@@ -1,0 +1,53 @@
+# The spec's first milestone: the same screen written in TypeScript strict + Zod
+# + ESLint and in SeamScript, with three bugs. Each side's test job asks whether
+# each bug is stopped before it reaches a user, so the TypeScript job is red and
+# the SeamScript job is green. A third job checks that this split still holds.
+name: Comparison demo
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  ts-zod-eslint:
+    name: TypeScript strict + Zod + ESLint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm install -g yarn@1.22.22
+      - run: yarn install --frozen-lockfile
+      - name: tsc --strict and ESLint (recommended) pass
+        run: yarn workspace @seamscript-demo/ts-zod-eslint lint
+      - name: Are the three bugs stopped? (expected to fail)
+        run: yarn workspace @seamscript-demo/ts-zod-eslint test
+
+  seamscript:
+    name: SeamScript
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm install -g yarn@1.22.22
+      - run: yarn install --frozen-lockfile
+      - name: Build runtime, parser and compiler
+        run: yarn build
+      - name: Are the three bugs stopped?
+        run: yarn workspace @seamscript-demo/seamscript test
+
+  expected-split:
+    name: Demo still shows the expected split
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm install -g yarn@1.22.22
+      - run: yarn install --frozen-lockfile
+      - run: yarn build
+      - run: yarn demo

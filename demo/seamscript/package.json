@@ -1,0 +1,19 @@
+{
+  "name": "@seamscript-demo/seamscript",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The comparison demo's screen in SeamScript",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@seamscript/runtime": "0.0.0"
+  },
+  "devDependencies": {
+    "@seamscript/compiler": "0.0.0",
+    "typescript": "5.9.3",
+    "vite": "8.3.4",
+    "vitest": "5.0.3"
+  }
+}
