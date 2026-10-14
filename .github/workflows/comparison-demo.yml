@@ -1,7 +1,9 @@
-# The spec's first milestone: the same screen written in TypeScript strict + Zod
-# + ESLint and in SeamScript, with three bugs. Each side's test job asks whether
-# each bug is stopped before it reaches a user, so the TypeScript job is red and
-# the SeamScript job is green. A third job checks that this split still holds.
+# The comparison demo: the same screen written in TypeScript strict + Zod +
+# ESLint and in SeamScript, with three bugs. Each side's tests ask whether each
+# bug is stopped before it reaches a user. On the TypeScript side they are
+# expected to fail, so that job passes when they do; the SeamScript job passes
+# when they pass. A third job runs `yarn demo`, which checks the exact split
+# (every TypeScript test failed, every SeamScript test passed).
 name: Comparison demo
 
 on:
@@ -21,8 +23,8 @@ jobs:
       - run: yarn install --frozen-lockfile
       - name: tsc --strict and ESLint (recommended) pass
         run: yarn workspace @seamscript-demo/ts-zod-eslint lint
-      - name: Are the three bugs stopped? (expected to fail)
-        run: yarn workspace @seamscript-demo/ts-zod-eslint test
+      - name: The three bugs get through (the tests are expected to fail)
+        run: "! yarn workspace @seamscript-demo/ts-zod-eslint test"
 
   seamscript:
     name: SeamScript

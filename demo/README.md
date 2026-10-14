@@ -15,7 +15,7 @@ Bug                               TS + Zod + ESLint        SeamScript
 
 ## What it checks
 
-`ts-zod-eslint/test/bugs.test.ts` and `seamscript/test/bugs.test.ts` each have three tests with the same titles. Each test checks whether the bug is stopped before it reaches the user. All three fail on the TS side, and all three pass on the SeamScript side. In CI (`.github/workflows/comparison-demo.yml`) as well, the TS job is red and the SeamScript job is green.
+`ts-zod-eslint/test/bugs.test.ts` and `seamscript/test/bugs.test.ts` each have three tests with the same titles. Each test checks whether the bug is stopped before it reaches the user. All three fail on the TS side, and all three pass on the SeamScript side. CI (`.github/workflows/comparison-demo.yml`) checks the same split: the TS job passes when its three tests fail, the SeamScript job passes when its three tests pass, and a third job runs `yarn demo`.
 
 On the TS side, neither `tsc --strict` nor ESLint reports an error (`yarn workspace @seamscript-demo/ts-zod-eslint lint`). In other words, the bugs remain even though the code passes every type check and lint rule.
 
