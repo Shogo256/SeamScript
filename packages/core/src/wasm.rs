@@ -8,17 +8,16 @@
 //!
 //! WebAssembly here is single-threaded, so the shared state is safe.
 
-use crate::{Form, UNICODE_VERSION, grapheme_boundaries_utf16_into, grapheme_count};
+use crate::{Form, UNICODE_VERSION, segment};
 use unicode_normalization::{IsNormalized, UnicodeNormalization, is_nfc_quick, is_nfd_quick};
 
 struct Buffers {
     input: Vec<u16>,
-    utf8: String,
     output: Vec<u16>,
     boundaries: Vec<u32>,
 }
 
-static mut BUFFERS: Buffers = Buffers { input: Vec::new(), utf8: String::new(), output: Vec::new(), boundaries: Vec::new() };
+static mut BUFFERS: Buffers = Buffers { input: Vec::new(), output: Vec::new(), boundaries: Vec::new() };
 static mut RESULT: [u32; 2] = [0, 0];
 
 fn buffers() -> &'static mut Buffers {
@@ -90,18 +89,10 @@ pub extern "C" fn seam_normalize(len: usize, form: u32) -> i32 {
     1
 }
 
-/// unicode-segmentation works on `str`, so segmentation goes through UTF-8.
-fn utf8<'a>(input: &[u16], utf8: &'a mut String) -> &'a str {
-    utf8.clear();
-    utf8.extend(chars(input, &mut false));
-    utf8
-}
-
 /// The number of grapheme clusters in the first `len` code units of the input.
 #[unsafe(no_mangle)]
 pub extern "C" fn seam_grapheme_count(len: usize) -> u32 {
-    let Buffers { input, utf8: s, .. } = buffers();
-    grapheme_count(utf8(&input[..len], s)) as u32
+    segment::count_utf16(&buffers().input[..len]) as u32
 }
 
 /// UTF-16 offsets of the first `limit + 1` grapheme cluster boundaries of the
@@ -109,9 +100,9 @@ pub extern "C" fn seam_grapheme_count(len: usize) -> u32 {
 /// `RESULT`. Returns how many there are.
 #[unsafe(no_mangle)]
 pub extern "C" fn seam_graphemes(len: usize, limit: u32) -> u32 {
-    let Buffers { input, utf8: s, boundaries, .. } = buffers();
+    let Buffers { input, boundaries, .. } = buffers();
     boundaries.clear();
-    grapheme_boundaries_utf16_into(utf8(&input[..len], s), limit as usize, boundaries);
+    segment::boundaries_utf16(&input[..len], limit as usize, boundaries);
     set_result(boundaries);
     boundaries.len() as u32
 }

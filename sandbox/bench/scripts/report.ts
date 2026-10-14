@@ -128,7 +128,7 @@ export function report(results: Record<string, unknown>): string {
   const parts = [
     "# Benchmark results",
     "",
-    meta ? `${String(meta["date"])}, ${String(meta["cpu"])} (${String(meta["cores"])} cores, ${String(meta["memoryGiB"])} GiB), Node ${String(meta["node"])}, commit ${String(meta["commit"])}${meta["dirty"] ? " (with uncommitted changes)" : ""}${meta["quick"] ? ", --quick" : ""}.` : "",
+    meta ? `${String(meta["date"])}, ${String(meta["cpu"])} (${String(meta["cores"])} cores, ${String(meta["memoryGiB"])} GiB), Node ${String(meta["node"])}${meta["icu"] ? ` (ICU ${String(meta["icu"])}, Unicode ${String(meta["unicode"])})` : ""}, commit ${String(meta["commit"])}${meta["dirty"] ? " (with uncommitted changes)" : ""}${meta["quick"] ? ", --quick" : ""}.` : "",
     ...(typeof meta?.["loadAtStart"] === "number"
       ? ["", `Load average (1 min) at the start and end of the run: ${(meta["loadAtStart"] as number).toFixed(1)}, ${typeof meta["loadAtEnd"] === "number" ? (meta["loadAtEnd"] as number).toFixed(1) : "—"}. Absolute values move a lot when other programs are using the CPU; ratios are much less affected.`]
       : []),

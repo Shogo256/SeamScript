@@ -1,35 +1,33 @@
 # Benchmark results
 
-2026-10-14T01:31:50.003Z, Intel(R) Core(TM) i7-8550U CPU @ 1.80GHz (8 cores, 15 GiB), Node v24.18.0, commit 2e6098d (with uncommitted changes).
+2026-10-14T05:32:32.592Z, Intel(R) Core(TM) i7-8550U CPU @ 1.80GHz (8 cores, 15 GiB), Node v24.18.0 (ICU 76.1, Unicode 16.0), commit b1a75a2 (with uncommitted changes).
 
-The load average (1 min) during the run was 12 to 28 (on an 8-core machine, with other applications using the CPU). Absolute values are inflated to 2 to 4 times those of the 2026-10-12 run, but every budget is a ratio to a baseline measured in the same run, which is much less affected.
+Load average (1 min) at the start and end of the run: 7.0, 1.4. Absolute values move a lot when other programs are using the CPU; ratios are much less affected.
 
-**WebKit latency was measured again**: in the full run, "send→DOM p95, 50 messages/s" came out at 1.52×, over the 1.5× limit. Only SeamScript's second round had jumped: p50 from 21ms to 55ms, and p95 to 134ms (its first round had a p95 of 52ms, faster than the TS app's two rounds at 88ms and 62ms). Handling one message takes around 0.1ms, so the conclusion was that the browser itself was waiting for the CPU, and only the WebKit latency was measured again (load average 14 to 19). The tables and budgets below use the re-measured values: 1.15 / 1.17 / 1.13× at 50 / 500 / 2,000 messages/s. The full run's values are kept in `meta.latencyRerun.firstRun` in `bench/results/results.json`. In the re-measured run SeamScript was 10–20% slower than the TS app, but in the full run it was 1.02 / 1.06× at 500 / 2,000 messages/s, and in the previous run (the lightly loaded 2026-10-12) 0.72–1.12×. A difference this small can't be told apart from noise caused by load.
-
-In this run's hyperfine measurement, `seamc check` took 1.19× as long as tsc. That was under heavy load; a separate run that alternated the two, 8 times each, gave a median of 1.36×.
+Node here is the nixpkgs build, linked against the system ICU 76.1. Official Node builds bundle ICU 78.3 (Unicode 17.0), whose `Intl.Segmenter` counts the Khmer sample as 10 graphemes instead of 30 and is faster for it. With the official Node 24.18.0 on the same machine, `Text.length` (uncached) is 0.22× `Intl.Segmenter` for Khmer and 0.15× for the emoji sample. CI runs on official Node.
 
 ## Budgets (ratios to a baseline measured in the same run)
 
 | Item | Measured | Limit | Result |
 |---|---|---|---|
-| Node decode: tick: SeamScript ÷ Zod with the same checks | 0.59× | 1.30× | OK |
-| Node decode: order event: SeamScript ÷ Zod with the same checks | 0.56× | 1.30× | OK |
+| Node decode: tick: SeamScript ÷ Zod with the same checks | 0.56× | 1.30× | OK |
+| Node decode: order event: SeamScript ÷ Zod with the same checks | 0.59× | 1.30× | OK |
 | Node decode: snapshot (40 + 1000 orders): SeamScript ÷ Zod with the same checks | 0.53× | 1.30× | OK |
-| Node length Japanese 20: Text ÷ Intl | 0.03× | 1.00× | OK |
+| Node length Japanese 20: Text ÷ Intl | 0.02× | 1.00× | OK |
 | Node NFC Japanese 20: Text.nfc ÷ normalize | 0.88× | 6.00× | OK |
-| Node length Khmer (changed in Unicode 17): Text ÷ Intl | 0.60× | 1.00× | OK |
-| Node NFC Khmer (changed in Unicode 17): Text.nfc ÷ normalize | 3.46× | 6.00× | OK |
-| seamc check ÷ tsc (same program) | 1.19× | 1.60× | OK |
-| Bundle gzip: no core ÷ TS + Zod | 0.83× | 0.90× | OK |
-| gzip bytes added by the core | 111156 | 115000 | OK |
-| Latency (send→DOM) p95 chromium 149.0.7827.55 50 messages/s: SeamScript ÷ TS | 0.95× | 1.50× | OK |
-| Latency (send→DOM) p95 chromium 149.0.7827.55 500 messages/s: SeamScript ÷ TS | 1.03× | 1.50× | OK |
-| Latency (send→DOM) p95 chromium 149.0.7827.55 2000 messages/s: SeamScript ÷ TS | 1.01× | 1.50× | OK |
-| Latency (send→DOM) p95 webkit 26.5 50 messages/s: SeamScript ÷ TS | 1.15× | 1.50× | OK |
-| Latency (send→DOM) p95 webkit 26.5 500 messages/s: SeamScript ÷ TS | 1.17× | 1.50× | OK |
-| Latency (send→DOM) p95 webkit 26.5 2000 messages/s: SeamScript ÷ TS | 1.13× | 1.50× | OK |
-| Start-up chromium 149.0.7827.55: with core ÷ without | 1.10× | 1.50× | OK |
-| Start-up webkit 26.5: with core ÷ without | 1.27× | 1.50× | OK |
+| Node length Khmer (changed in Unicode 17): Text ÷ Intl | 0.12× | 1.00× | OK |
+| Node NFC Khmer (changed in Unicode 17): Text.nfc ÷ normalize | 3.04× | 6.00× | OK |
+| seamc check ÷ tsc (same program) | 1.20× | 1.60× | OK |
+| Bundle gzip: no core ÷ TS + Zod | 0.82× | 0.90× | OK |
+| gzip bytes added by the core | 92650 | 115000 | OK |
+| Latency (send→DOM) p95 chromium 149.0.7827.55 50 messages/s: SeamScript ÷ TS | 0.86× | 1.50× | OK |
+| Latency (send→DOM) p95 chromium 149.0.7827.55 500 messages/s: SeamScript ÷ TS | 1.02× | 1.50× | OK |
+| Latency (send→DOM) p95 chromium 149.0.7827.55 2000 messages/s: SeamScript ÷ TS | 1.03× | 1.50× | OK |
+| Latency (send→DOM) p95 webkit 26.5 50 messages/s: SeamScript ÷ TS | 0.87× | 1.50× | OK |
+| Latency (send→DOM) p95 webkit 26.5 500 messages/s: SeamScript ÷ TS | 0.98× | 1.50× | OK |
+| Latency (send→DOM) p95 webkit 26.5 2000 messages/s: SeamScript ÷ TS | 0.94× | 1.50× | OK |
+| Start-up chromium 149.0.7827.55: with core ÷ without | 1.04× | 1.50× | OK |
+| Start-up webkit 26.5: with core ÷ without | 1.22× | 1.50× | OK |
 
 ## decode (per call, p50 / p95 / p99)
 
@@ -39,52 +37,52 @@ In this run's hyperfine measurement, `seamc check` took 1.19× as long as tsc. T
 
 | Input | Method | p50 / p95 / p99 | Ratio |
 |---|---|---|---|
-| decode: tick | SeamScript decode | 3.68 µs / 4.15 µs / 4.78 µs | 0.59× |
-| decode: tick | Zod (the TS app's schemas) | 3.04 µs / 3.81 µs / 25.9 µs | 0.49× |
-| decode: tick | Zod (same checks as SeamScript) | 6.21 µs / 7.58 µs / 72.8 µs |  |
-| decode: order event | SeamScript decode | 9.95 µs / 11.6 µs / 14.0 µs | 0.56× |
-| decode: order event | Zod (the TS app's schemas) | 9.24 µs / 66.5 µs / 116 µs | 0.52× |
-| decode: order event | Zod (same checks as SeamScript) | 17.7 µs / 24.9 µs / 184 µs |  |
-| decode: snapshot (40 + 1000 orders) | SeamScript decode | 8.04 ms / 9.33 ms / 32.0 ms | 0.53× |
-| decode: snapshot (40 + 1000 orders) | Zod (the TS app's schemas) | 7.58 ms / 10.1 ms / 60.9 ms | 0.50× |
-| decode: snapshot (40 + 1000 orders) | Zod (same checks as SeamScript) | 15.2 ms / 24.2 ms / 56.2 ms |  |
-| parse + decode: tick | SeamScript | 6.88 µs / 7.81 µs / 8.30 µs | 2.85× |
-| parse + decode: tick | JSON.parse only | 2.41 µs / 3.28 µs / 9.90 µs |  |
-| parse + decode: tick | Zod (the TS app's schemas) | 6.64 µs / 9.99 µs / 47.8 µs | 2.75× |
+| decode: tick | SeamScript decode | 1.18 µs / 1.63 µs / 15.1 µs | 0.56× |
+| decode: tick | Zod (the TS app's schemas) | 1.05 µs / 1.34 µs / 4.86 µs | 0.49× |
+| decode: tick | Zod (same checks as SeamScript) | 2.13 µs / 2.46 µs / 12.0 µs |  |
+| decode: order event | SeamScript decode | 3.22 µs / 4.03 µs / 30.7 µs | 0.59× |
+| decode: order event | Zod (the TS app's schemas) | 2.92 µs / 3.47 µs / 11.9 µs | 0.53× |
+| decode: order event | Zod (same checks as SeamScript) | 5.50 µs / 6.69 µs / 11.0 µs |  |
+| decode: snapshot (40 + 1000 orders) | SeamScript decode | 2.74 ms / 3.22 ms / 8.84 ms | 0.53× |
+| decode: snapshot (40 + 1000 orders) | Zod (the TS app's schemas) | 2.51 ms / 3.87 ms / 16.6 ms | 0.49× |
+| decode: snapshot (40 + 1000 orders) | Zod (same checks as SeamScript) | 5.18 ms / 9.92 ms / 44.1 ms |  |
+| parse + decode: tick | SeamScript | 2.42 µs / 2.77 µs / 10.4 µs | 2.89× |
+| parse + decode: tick | JSON.parse only | 836 ns / 1.05 µs / 4.08 µs |  |
+| parse + decode: tick | Zod (the TS app's schemas) | 2.14 µs / 5.18 µs / 19.1 µs | 2.56× |
 
 ### chromium 149.0.7827.55
 
 | Input | Method | p50 / p95 / p99 | Ratio |
 |---|---|---|---|
-| decode: tick | SeamScript decode | 2.96 µs / 3.54 µs / 6.07 µs | 0.39× |
-| decode: tick | Zod (the TS app's schemas) | 5.31 µs / 6.45 µs / 6.65 µs | 0.70× |
-| decode: tick | Zod (same checks as SeamScript) | 7.59 µs / 10.2 µs / 55.8 µs |  |
-| decode: order event | SeamScript decode | 8.10 µs / 10.1 µs / 13.0 µs | 0.34× |
-| decode: order event | Zod (the TS app's schemas) | 15.8 µs / 18.8 µs / 19.6 µs | 0.66× |
-| decode: order event | Zod (same checks as SeamScript) | 23.9 µs / 37.5 µs / 144 µs |  |
-| decode: snapshot (40 + 1000 orders) | SeamScript decode | 6.80 ms / 8.33 ms / 12.7 ms | 0.32× |
-| decode: snapshot (40 + 1000 orders) | Zod (the TS app's schemas) | 13.1 ms / 17.0 ms / 46.8 ms | 0.63× |
-| decode: snapshot (40 + 1000 orders) | Zod (same checks as SeamScript) | 21.0 ms / 25.6 ms / 27.8 ms |  |
-| parse + decode: tick | SeamScript | 5.29 µs / 6.56 µs / 8.87 µs | 3.68× |
-| parse + decode: tick | JSON.parse only | 1.44 µs / 1.64 µs / 2.41 µs |  |
-| parse + decode: tick | Zod (the TS app's schemas) | 7.12 µs / 11.3 µs / 53.8 µs | 4.96× |
+| decode: tick | SeamScript decode | 879 ns / 962 ns / 1.37 µs | 0.38× |
+| decode: tick | Zod (the TS app's schemas) | 1.55 µs / 1.82 µs / 2.08 µs | 0.67× |
+| decode: tick | Zod (same checks as SeamScript) | 2.31 µs / 2.46 µs / 2.68 µs |  |
+| decode: order event | SeamScript decode | 2.39 µs / 2.75 µs / 8.07 µs | 0.36× |
+| decode: order event | Zod (the TS app's schemas) | 4.75 µs / 5.99 µs / 11.7 µs | 0.71× |
+| decode: order event | Zod (same checks as SeamScript) | 6.65 µs / 7.37 µs / 9.45 µs |  |
+| decode: snapshot (40 + 1000 orders) | SeamScript decode | 2.00 ms / 2.38 ms / 4.65 ms | 0.35× |
+| decode: snapshot (40 + 1000 orders) | Zod (the TS app's schemas) | 3.80 ms / 4.77 ms / 5.12 ms | 0.67× |
+| decode: snapshot (40 + 1000 orders) | Zod (same checks as SeamScript) | 5.70 ms / 7.19 ms / 13.1 ms |  |
+| parse + decode: tick | SeamScript | 1.34 µs / 1.76 µs / 4.33 µs | 3.24× |
+| parse + decode: tick | JSON.parse only | 415 ns / 465 ns / 559 ns |  |
+| parse + decode: tick | Zod (the TS app's schemas) | 2.32 µs / 2.56 µs / 2.66 µs | 5.61× |
 
 ### webkit 26.5
 
 | Input | Method | p50 / p95 / p99 | Ratio |
 |---|---|---|---|
-| decode: tick | SeamScript decode | 2.00 µs / 2.62 µs / 2.78 µs | 0.21× |
-| decode: tick | Zod (the TS app's schemas) | 5.27 µs / 8.95 µs / 10.0 µs | 0.57× |
-| decode: tick | Zod (same checks as SeamScript) | 9.32 µs / 16.0 µs / 25.2 µs |  |
-| decode: order event | SeamScript decode | 6.42 µs / 7.96 µs / 8.47 µs | 0.24× |
-| decode: order event | Zod (the TS app's schemas) | 19.7 µs / 33.5 µs / 49.3 µs | 0.74× |
-| decode: order event | Zod (same checks as SeamScript) | 26.8 µs / 40.4 µs / 56.7 µs |  |
-| decode: snapshot (40 + 1000 orders) | SeamScript decode | 5.20 ms / 6.61 ms / 6.90 ms | 0.21× |
-| decode: snapshot (40 + 1000 orders) | Zod (the TS app's schemas) | 15.7 ms / 27.3 ms / 33.9 ms | 0.65× |
-| decode: snapshot (40 + 1000 orders) | Zod (same checks as SeamScript) | 24.3 ms / 32.4 ms / 36.8 ms |  |
-| parse + decode: tick | SeamScript | 3.65 µs / 4.25 µs / 5.46 µs | 2.92× |
-| parse + decode: tick | JSON.parse only | 1.25 µs / 1.65 µs / 1.94 µs |  |
-| parse + decode: tick | Zod (the TS app's schemas) | 8.41 µs / 15.3 µs / 19.5 µs | 6.74× |
+| decode: tick | SeamScript decode | 533 ns / 643 ns / 713 ns | 0.24× |
+| decode: tick | Zod (the TS app's schemas) | 1.45 µs / 1.73 µs / 2.39 µs | 0.65× |
+| decode: tick | Zod (same checks as SeamScript) | 2.24 µs / 2.54 µs / 2.67 µs |  |
+| decode: order event | SeamScript decode | 1.71 µs / 2.46 µs / 2.81 µs | 0.27× |
+| decode: order event | Zod (the TS app's schemas) | 4.42 µs / 5.33 µs / 5.43 µs | 0.69× |
+| decode: order event | Zod (same checks as SeamScript) | 6.44 µs / 8.48 µs / 10.1 µs |  |
+| decode: snapshot (40 + 1000 orders) | SeamScript decode | 1.35 ms / 1.63 ms / 1.78 ms | 0.21× |
+| decode: snapshot (40 + 1000 orders) | Zod (the TS app's schemas) | 3.79 ms / 4.38 ms / 5.78 ms | 0.59× |
+| decode: snapshot (40 + 1000 orders) | Zod (same checks as SeamScript) | 6.45 ms / 7.60 ms / 8.43 ms |  |
+| parse + decode: tick | SeamScript | 906 ns / 1.18 µs / 1.29 µs | 3.23× |
+| parse + decode: tick | JSON.parse only | 281 ns / 335 ns / 377 ns |  |
+| parse + decode: tick | Zod (the TS app's schemas) | 1.88 µs / 2.33 µs / 2.67 µs | 6.68× |
 
 ## Text operations (per call, p50 / p95 / p99)
 
@@ -94,189 +92,189 @@ In this run's hyperfine measurement, `seamc check` took 1.19× as long as tsc. T
 
 | Operation / string | Method | p50 / p95 / p99 |
 |---|---|---|
-| length: ASCII 21 | Text.length (same string: cached) | 355 ns / 432 ns / 464 ns |
-| length: ASCII 21 | Text.length (1024 strings: uncached) | 416 ns / 505 ns / 525 ns |
-| length: ASCII 21 | Intl.Segmenter count | 16.3 µs / 23.7 µs / 156 µs |
-| slice(0, 10): ASCII 21 | Text.slice (uncached) | 507 ns / 1.99 µs / 12.0 µs |
-| slice(0, 10): ASCII 21 | Intl.Segmenter slice | 11.7 µs / 17.5 µs / 35.1 µs |
-| NFC: ASCII 21 | Text.nfc | 345 ns / 402 ns / 416 ns |
-| NFC: ASCII 21 | String.prototype.normalize | 344 ns / 396 ns / 404 ns |
-| length: Japanese 20 | Text.length (same string: cached) | 381 ns / 481 ns / 503 ns |
-| length: Japanese 20 | Text.length (1024 strings: uncached) | 464 ns / 584 ns / 605 ns |
-| length: Japanese 20 | Intl.Segmenter count | 18.5 µs / 28.7 µs / 161 µs |
-| slice(0, 10): Japanese 20 | Text.slice (uncached) | 517 ns / 773 ns / 1.81 µs |
-| slice(0, 10): Japanese 20 | Intl.Segmenter slice | 12.8 µs / 45.2 µs / 95.4 µs |
-| NFC: Japanese 20 | Text.nfc | 352 ns / 429 ns / 469 ns |
-| NFC: Japanese 20 | String.prototype.normalize | 398 ns / 451 ns / 504 ns |
-| length: Emoji (ZWJ, flags, skin tones) | Text.length (same string: cached) | 165 ns / 214 ns / 234 ns |
-| length: Emoji (ZWJ, flags, skin tones) | Text.length (1024 strings: uncached) | 12.4 µs / 13.5 µs / 14.9 µs |
-| length: Emoji (ZWJ, flags, skin tones) | Intl.Segmenter count | 21.7 µs / 40.1 µs / 105 µs |
-| slice(0, 10): Emoji (ZWJ, flags, skin tones) | Text.slice (uncached) | 14.2 µs / 16.3 µs / 18.9 µs |
-| slice(0, 10): Emoji (ZWJ, flags, skin tones) | Intl.Segmenter slice | 15.9 µs / 18.5 µs / 86.4 µs |
-| NFC: Emoji (ZWJ, flags, skin tones) | Text.nfc | 1.52 µs / 1.74 µs / 1.94 µs |
-| NFC: Emoji (ZWJ, flags, skin tones) | String.prototype.normalize | 851 ns / 954 ns / 976 ns |
-| length: Khmer (changed in Unicode 17) | Text.length (same string: cached) | 132 ns / 157 ns / 169 ns |
-| length: Khmer (changed in Unicode 17) | Text.length (1024 strings: uncached) | 16.4 µs / 18.0 µs / 18.3 µs |
-| length: Khmer (changed in Unicode 17) | Intl.Segmenter count | 27.1 µs / 59.7 µs / 131 µs |
-| slice(0, 10): Khmer (changed in Unicode 17) | Text.slice (uncached) | 16.2 µs / 19.0 µs / 19.6 µs |
-| slice(0, 10): Khmer (changed in Unicode 17) | Intl.Segmenter slice | 14.1 µs / 28.4 µs / 94.5 µs |
-| NFC: Khmer (changed in Unicode 17) | Text.nfc | 4.33 µs / 4.75 µs / 4.97 µs |
-| NFC: Khmer (changed in Unicode 17) | String.prototype.normalize | 1.25 µs / 1.37 µs / 1.41 µs |
-| length: Accented Latin | Text.length (same string: cached) | 485 ns / 582 ns / 609 ns |
-| length: Accented Latin | Text.length (1024 strings: uncached) | 541 ns / 657 ns / 725 ns |
-| length: Accented Latin | Intl.Segmenter count | 19.5 µs / 65.4 µs / 81.7 µs |
-| slice(0, 10): Accented Latin | Text.slice (uncached) | 492 ns / 1.01 µs / 3.54 µs |
-| slice(0, 10): Accented Latin | Intl.Segmenter slice | 11.9 µs / 14.2 µs / 113 µs |
-| NFC: Accented Latin | Text.nfc | 7.84 µs / 9.03 µs / 28.0 µs |
-| NFC: Accented Latin | String.prototype.normalize | 2.00 µs / 2.32 µs / 2.39 µs |
-| length: Japanese 10 KB | Text.length (same string: cached) | 78 ns / 86 ns / 93 ns |
-| length: Japanese 10 KB | Text.length (1024 strings: uncached) | 57.8 µs / 77.0 µs / 84.1 µs |
-| length: Japanese 10 KB | Intl.Segmenter count | 1.80 ms / 2.46 ms / 7.14 ms |
-| slice(0, 10): Japanese 10 KB | Text.slice (uncached) | 599 ns / 1.04 µs / 4.94 µs |
-| slice(0, 10): Japanese 10 KB | Intl.Segmenter slice | 19.3 µs / 51.8 µs / 100 µs |
-| NFC: Japanese 10 KB | Text.nfc | 51.0 µs / 61.3 µs / 63.5 µs |
-| NFC: Japanese 10 KB | String.prototype.normalize | 18.6 µs / 23.4 µs / 23.7 µs |
+| length: ASCII 21 | Text.length (same string: cached) | 122 ns / 154 ns / 173 ns |
+| length: ASCII 21 | Text.length (1024 strings: uncached) | 135 ns / 145 ns / 157 ns |
+| length: ASCII 21 | Intl.Segmenter count | 5.92 µs / 36.8 µs / 42.5 µs |
+| slice(0, 10): ASCII 21 | Text.slice (uncached) | 161 ns / 223 ns / 2.64 µs |
+| slice(0, 10): ASCII 21 | Intl.Segmenter slice | 4.08 µs / 20.0 µs / 29.1 µs |
+| NFC: ASCII 21 | Text.nfc | 120 ns / 151 ns / 198 ns |
+| NFC: ASCII 21 | String.prototype.normalize | 111 ns / 182 ns / 215 ns |
+| length: Japanese 20 | Text.length (same string: cached) | 133 ns / 148 ns / 155 ns |
+| length: Japanese 20 | Text.length (1024 strings: uncached) | 149 ns / 165 ns / 169 ns |
+| length: Japanese 20 | Intl.Segmenter count | 6.45 µs / 19.9 µs / 35.7 µs |
+| slice(0, 10): Japanese 20 | Text.slice (uncached) | 166 ns / 229 ns / 1.16 µs |
+| slice(0, 10): Japanese 20 | Intl.Segmenter slice | 4.47 µs / 25.5 µs / 36.2 µs |
+| NFC: Japanese 20 | Text.nfc | 124 ns / 147 ns / 183 ns |
+| NFC: Japanese 20 | String.prototype.normalize | 141 ns / 170 ns / 182 ns |
+| length: Emoji (ZWJ, flags, skin tones) | Text.length (same string: cached) | 51 ns / 78 ns / 84 ns |
+| length: Emoji (ZWJ, flags, skin tones) | Text.length (1024 strings: uncached) | 1.14 µs / 1.24 µs / 1.39 µs |
+| length: Emoji (ZWJ, flags, skin tones) | Intl.Segmenter count | 8.05 µs / 34.3 µs / 36.9 µs |
+| slice(0, 10): Emoji (ZWJ, flags, skin tones) | Text.slice (uncached) | 1.46 µs / 1.93 µs / 10.6 µs |
+| slice(0, 10): Emoji (ZWJ, flags, skin tones) | Intl.Segmenter slice | 5.46 µs / 22.1 µs / 35.1 µs |
+| NFC: Emoji (ZWJ, flags, skin tones) | Text.nfc | 557 ns / 1.01 µs / 1.15 µs |
+| NFC: Emoji (ZWJ, flags, skin tones) | String.prototype.normalize | 298 ns / 348 ns / 355 ns |
+| length: Khmer (changed in Unicode 17) | Text.length (same string: cached) | 41 ns / 62 ns / 72 ns |
+| length: Khmer (changed in Unicode 17) | Text.length (1024 strings: uncached) | 1.13 µs / 1.28 µs / 1.53 µs |
+| length: Khmer (changed in Unicode 17) | Intl.Segmenter count | 9.37 µs / 32.7 µs / 68.1 µs |
+| slice(0, 10): Khmer (changed in Unicode 17) | Text.slice (uncached) | 1.41 µs / 1.67 µs / 3.84 µs |
+| slice(0, 10): Khmer (changed in Unicode 17) | Intl.Segmenter slice | 5.27 µs / 34.9 µs / 39.5 µs |
+| NFC: Khmer (changed in Unicode 17) | Text.nfc | 1.39 µs / 1.69 µs / 1.81 µs |
+| NFC: Khmer (changed in Unicode 17) | String.prototype.normalize | 457 ns / 962 ns / 979 ns |
+| length: Accented Latin | Text.length (same string: cached) | 155 ns / 178 ns / 193 ns |
+| length: Accented Latin | Text.length (1024 strings: uncached) | 167 ns / 210 ns / 223 ns |
+| length: Accented Latin | Intl.Segmenter count | 7.24 µs / 30.1 µs / 44.7 µs |
+| slice(0, 10): Accented Latin | Text.slice (uncached) | 150 ns / 183 ns / 632 ns |
+| slice(0, 10): Accented Latin | Intl.Segmenter slice | 4.26 µs / 17.3 µs / 33.1 µs |
+| NFC: Accented Latin | Text.nfc | 2.58 µs / 3.08 µs / 19.7 µs |
+| NFC: Accented Latin | String.prototype.normalize | 807 ns / 1.06 µs / 2.92 µs |
+| length: Japanese 10 KB | Text.length (same string: cached) | 28 ns / 30 ns / 31 ns |
+| length: Japanese 10 KB | Text.length (1024 strings: uncached) | 17.3 µs / 24.8 µs / 28.7 µs |
+| length: Japanese 10 KB | Intl.Segmenter count | 581 µs / 1.20 ms / 3.14 ms |
+| slice(0, 10): Japanese 10 KB | Text.slice (uncached) | 176 ns / 196 ns / 333 ns |
+| slice(0, 10): Japanese 10 KB | Intl.Segmenter slice | 7.82 µs / 19.5 µs / 59.1 µs |
+| NFC: Japanese 10 KB | Text.nfc | 17.3 µs / 21.5 µs / 39.0 µs |
+| NFC: Japanese 10 KB | String.prototype.normalize | 7.55 µs / 8.44 µs / 8.78 µs |
 
 ### Node v24.18.0 (Text: host ICU)
 
 | Operation / string | Method | p50 / p95 / p99 |
 |---|---|---|
-| length: ASCII 21 | Text.length (same string: cached) | 184 ns / 209 ns / 214 ns |
-| length: ASCII 21 | Text.length (1024 strings: uncached) | 219 ns / 326 ns / 477 ns |
-| length: ASCII 21 | Intl.Segmenter count | 15.9 µs / 55.5 µs / 185 µs |
-| slice(0, 10): ASCII 21 | Text.slice (uncached) | 349 ns / 617 ns / 11.7 µs |
-| slice(0, 10): ASCII 21 | Intl.Segmenter slice | 11.6 µs / 88.0 µs / 94.6 µs |
-| NFC: ASCII 21 | Text.nfc | 453 ns / 536 ns / 580 ns |
-| NFC: ASCII 21 | String.prototype.normalize | 326 ns / 387 ns / 396 ns |
-| length: Japanese 20 | Text.length (same string: cached) | 17.5 µs / 70.6 µs / 117 µs |
-| length: Japanese 20 | Text.length (1024 strings: uncached) | 18.1 µs / 92.0 µs / 126 µs |
-| length: Japanese 20 | Intl.Segmenter count | 18.4 µs / 98.1 µs / 159 µs |
-| slice(0, 10): Japanese 20 | Text.slice (uncached) | 12.1 µs / 62.4 µs / 103 µs |
-| slice(0, 10): Japanese 20 | Intl.Segmenter slice | 12.7 µs / 53.7 µs / 85.1 µs |
-| NFC: Japanese 20 | Text.nfc | 581 ns / 642 ns / 688 ns |
-| NFC: Japanese 20 | String.prototype.normalize | 374 ns / 445 ns / 455 ns |
-| length: Emoji (ZWJ, flags, skin tones) | Text.length (same string: cached) | 20.3 µs / 144 µs / 175 µs |
-| length: Emoji (ZWJ, flags, skin tones) | Text.length (1024 strings: uncached) | 22.3 µs / 129 µs / 172 µs |
-| length: Emoji (ZWJ, flags, skin tones) | Intl.Segmenter count | 22.1 µs / 77.2 µs / 89.8 µs |
-| slice(0, 10): Emoji (ZWJ, flags, skin tones) | Text.slice (uncached) | 14.5 µs / 65.5 µs / 102 µs |
-| slice(0, 10): Emoji (ZWJ, flags, skin tones) | Intl.Segmenter slice | 14.5 µs / 74.8 µs / 90.3 µs |
-| NFC: Emoji (ZWJ, flags, skin tones) | Text.nfc | 1.10 µs / 1.25 µs / 1.32 µs |
-| NFC: Emoji (ZWJ, flags, skin tones) | String.prototype.normalize | 823 ns / 934 ns / 952 ns |
-| length: Khmer (changed in Unicode 17) | Text.length (same string: cached) | 25.3 µs / 135 µs / 166 µs |
-| length: Khmer (changed in Unicode 17) | Text.length (1024 strings: uncached) | 24.8 µs / 111 µs / 182 µs |
-| length: Khmer (changed in Unicode 17) | Intl.Segmenter count | 25.9 µs / 101 µs / 129 µs |
-| slice(0, 10): Khmer (changed in Unicode 17) | Text.slice (uncached) | 13.6 µs / 46.3 µs / 93.2 µs |
-| slice(0, 10): Khmer (changed in Unicode 17) | Intl.Segmenter slice | 14.3 µs / 68.7 µs / 116 µs |
-| NFC: Khmer (changed in Unicode 17) | Text.nfc | 1.47 µs / 1.70 µs / 1.84 µs |
-| NFC: Khmer (changed in Unicode 17) | String.prototype.normalize | 1.20 µs / 1.36 µs / 1.56 µs |
-| length: Accented Latin | Text.length (same string: cached) | 19.0 µs / 73.7 µs / 85.2 µs |
-| length: Accented Latin | Text.length (1024 strings: uncached) | 18.8 µs / 87.5 µs / 126 µs |
-| length: Accented Latin | Intl.Segmenter count | 19.4 µs / 96.2 µs / 137 µs |
-| slice(0, 10): Accented Latin | Text.slice (uncached) | 11.1 µs / 82.0 µs / 95.7 µs |
-| slice(0, 10): Accented Latin | Intl.Segmenter slice | 11.6 µs / 54.8 µs / 81.0 µs |
-| NFC: Accented Latin | Text.nfc | 2.27 µs / 2.74 µs / 3.12 µs |
-| NFC: Accented Latin | String.prototype.normalize | 2.07 µs / 2.33 µs / 10.5 µs |
-| length: Japanese 10 KB | Text.length (same string: cached) | 1.73 ms / 7.91 ms / 14.0 ms |
-| length: Japanese 10 KB | Text.length (1024 strings: uncached) | 1.80 ms / 3.91 ms / 6.94 ms |
-| length: Japanese 10 KB | Intl.Segmenter count | 1.70 ms / 2.59 ms / 6.67 ms |
-| slice(0, 10): Japanese 10 KB | Text.slice (uncached) | 19.4 µs / 46.9 µs / 170 µs |
-| slice(0, 10): Japanese 10 KB | Intl.Segmenter slice | 18.6 µs / 46.7 µs / 177 µs |
-| NFC: Japanese 10 KB | Text.nfc | 28.4 µs / 53.7 µs / 75.2 µs |
-| NFC: Japanese 10 KB | String.prototype.normalize | 16.9 µs / 21.0 µs / 22.4 µs |
+| length: ASCII 21 | Text.length (same string: cached) | 57 ns / 72 ns / 78 ns |
+| length: ASCII 21 | Text.length (1024 strings: uncached) | 62 ns / 84 ns / 100 ns |
+| length: ASCII 21 | Intl.Segmenter count | 5.36 µs / 32.4 µs / 49.1 µs |
+| slice(0, 10): ASCII 21 | Text.slice (uncached) | 96 ns / 264 ns / 572 ns |
+| slice(0, 10): ASCII 21 | Intl.Segmenter slice | 4.06 µs / 27.0 µs / 33.2 µs |
+| NFC: ASCII 21 | Text.nfc | 102 ns / 241 ns / 327 ns |
+| NFC: ASCII 21 | String.prototype.normalize | 81 ns / 129 ns / 143 ns |
+| length: Japanese 20 | Text.length (same string: cached) | 5.35 µs / 26.1 µs / 40.5 µs |
+| length: Japanese 20 | Text.length (1024 strings: uncached) | 5.98 µs / 21.6 µs / 24.5 µs |
+| length: Japanese 20 | Intl.Segmenter count | 6.18 µs / 22.9 µs / 27.2 µs |
+| slice(0, 10): Japanese 20 | Text.slice (uncached) | 4.13 µs / 22.6 µs / 29.6 µs |
+| slice(0, 10): Japanese 20 | Intl.Segmenter slice | 4.24 µs / 19.6 µs / 23.2 µs |
+| NFC: Japanese 20 | Text.nfc | 145 ns / 190 ns / 208 ns |
+| NFC: Japanese 20 | String.prototype.normalize | 99 ns / 129 ns / 156 ns |
+| length: Emoji (ZWJ, flags, skin tones) | Text.length (same string: cached) | 7.34 µs / 21.7 µs / 23.0 µs |
+| length: Emoji (ZWJ, flags, skin tones) | Text.length (1024 strings: uncached) | 7.06 µs / 22.9 µs / 30.6 µs |
+| length: Emoji (ZWJ, flags, skin tones) | Intl.Segmenter count | 7.00 µs / 21.6 µs / 24.6 µs |
+| slice(0, 10): Emoji (ZWJ, flags, skin tones) | Text.slice (uncached) | 5.54 µs / 24.0 µs / 27.0 µs |
+| slice(0, 10): Emoji (ZWJ, flags, skin tones) | Intl.Segmenter slice | 5.43 µs / 21.3 µs / 25.9 µs |
+| NFC: Emoji (ZWJ, flags, skin tones) | Text.nfc | 316 ns / 389 ns / 482 ns |
+| NFC: Emoji (ZWJ, flags, skin tones) | String.prototype.normalize | 226 ns / 338 ns / 357 ns |
+| length: Khmer (changed in Unicode 17) | Text.length (same string: cached) | 8.43 µs / 27.1 µs / 29.2 µs |
+| length: Khmer (changed in Unicode 17) | Text.length (1024 strings: uncached) | 7.72 µs / 31.1 µs / 35.8 µs |
+| length: Khmer (changed in Unicode 17) | Intl.Segmenter count | 7.82 µs / 23.4 µs / 33.6 µs |
+| slice(0, 10): Khmer (changed in Unicode 17) | Text.slice (uncached) | 4.84 µs / 18.8 µs / 22.7 µs |
+| slice(0, 10): Khmer (changed in Unicode 17) | Intl.Segmenter slice | 4.65 µs / 22.5 µs / 27.9 µs |
+| NFC: Khmer (changed in Unicode 17) | Text.nfc | 428 ns / 510 ns / 538 ns |
+| NFC: Khmer (changed in Unicode 17) | String.prototype.normalize | 334 ns / 453 ns / 527 ns |
+| length: Accented Latin | Text.length (same string: cached) | 5.96 µs / 19.2 µs / 20.0 µs |
+| length: Accented Latin | Text.length (1024 strings: uncached) | 6.30 µs / 23.4 µs / 31.1 µs |
+| length: Accented Latin | Intl.Segmenter count | 6.23 µs / 23.7 µs / 31.1 µs |
+| slice(0, 10): Accented Latin | Text.slice (uncached) | 3.60 µs / 23.4 µs / 32.6 µs |
+| slice(0, 10): Accented Latin | Intl.Segmenter slice | 3.96 µs / 20.5 µs / 26.0 µs |
+| NFC: Accented Latin | Text.nfc | 665 ns / 1.10 µs / 2.40 µs |
+| NFC: Accented Latin | String.prototype.normalize | 592 ns / 933 ns / 2.43 µs |
+| length: Japanese 10 KB | Text.length (same string: cached) | 478 µs / 1.40 ms / 2.17 ms |
+| length: Japanese 10 KB | Text.length (1024 strings: uncached) | 486 µs / 993 µs / 1.74 ms |
+| length: Japanese 10 KB | Intl.Segmenter count | 479 µs / 690 µs / 1.51 ms |
+| slice(0, 10): Japanese 10 KB | Text.slice (uncached) | 6.90 µs / 33.7 µs / 45.8 µs |
+| slice(0, 10): Japanese 10 KB | Intl.Segmenter slice | 5.99 µs / 12.8 µs / 75.9 µs |
+| NFC: Japanese 10 KB | Text.nfc | 8.40 µs / 13.8 µs / 14.5 µs |
+| NFC: Japanese 10 KB | String.prototype.normalize | 5.98 µs / 8.69 µs / 9.52 µs |
 
 ### chromium 149.0.7827.55 (Text: WASM core, Unicode 17.0.0)
 
 | Operation / string | Method | p50 / p95 / p99 |
 |---|---|---|
-| length: ASCII 21 | Text.length (same string: cached) | 218 ns / 278 ns / 341 ns |
-| length: ASCII 21 | Text.length (1024 strings: uncached) | 241 ns / 291 ns / 302 ns |
-| length: ASCII 21 | Intl.Segmenter count | 19.8 µs / 36.0 µs / 96.0 µs |
-| slice(0, 10): ASCII 21 | Text.slice (uncached) | 397 ns / 532 ns / 1.89 µs |
-| slice(0, 10): ASCII 21 | Intl.Segmenter slice | 15.7 µs / 28.0 µs / 73.1 µs |
-| NFC: ASCII 21 | Text.nfc | 294 ns / 395 ns / 456 ns |
-| NFC: ASCII 21 | String.prototype.normalize | 384 ns / 562 ns / 600 ns |
-| length: Japanese 20 | Text.length (same string: cached) | 209 ns / 261 ns / 274 ns |
-| length: Japanese 20 | Text.length (1024 strings: uncached) | 239 ns / 355 ns / 525 ns |
-| length: Japanese 20 | Intl.Segmenter count | 21.5 µs / 30.6 µs / 87.1 µs |
-| slice(0, 10): Japanese 20 | Text.slice (uncached) | 354 ns / 421 ns / 440 ns |
-| slice(0, 10): Japanese 20 | Intl.Segmenter slice | 16.3 µs / 24.1 µs / 75.0 µs |
-| NFC: Japanese 20 | Text.nfc | 268 ns / 312 ns / 326 ns |
-| NFC: Japanese 20 | String.prototype.normalize | 398 ns / 455 ns / 511 ns |
-| length: Emoji (ZWJ, flags, skin tones) | Text.length (same string: cached) | 148 ns / 181 ns / 215 ns |
-| length: Emoji (ZWJ, flags, skin tones) | Text.length (1024 strings: uncached) | 11.2 µs / 15.4 µs / 16.4 µs |
-| length: Emoji (ZWJ, flags, skin tones) | Intl.Segmenter count | 26.0 µs / 34.0 µs / 48.8 µs |
-| slice(0, 10): Emoji (ZWJ, flags, skin tones) | Text.slice (uncached) | 12.9 µs / 15.9 µs / 20.6 µs |
-| slice(0, 10): Emoji (ZWJ, flags, skin tones) | Intl.Segmenter slice | 19.2 µs / 25.6 µs / 64.4 µs |
-| NFC: Emoji (ZWJ, flags, skin tones) | Text.nfc | 1.06 µs / 1.27 µs / 1.33 µs |
-| NFC: Emoji (ZWJ, flags, skin tones) | String.prototype.normalize | 930 ns / 1.14 µs / 1.37 µs |
-| length: Khmer (changed in Unicode 17) | Text.length (same string: cached) | 111 ns / 127 ns / 147 ns |
-| length: Khmer (changed in Unicode 17) | Text.length (1024 strings: uncached) | 15.0 µs / 16.9 µs / 18.2 µs |
-| length: Khmer (changed in Unicode 17) | Intl.Segmenter count | 19.6 µs / 38.0 µs / 104 µs |
-| slice(0, 10): Khmer (changed in Unicode 17) | Text.slice (uncached) | 15.9 µs / 18.5 µs / 22.6 µs |
-| slice(0, 10): Khmer (changed in Unicode 17) | Intl.Segmenter slice | 20.3 µs / 32.5 µs / 181 µs |
-| NFC: Khmer (changed in Unicode 17) | Text.nfc | 3.46 µs / 4.43 µs / 5.07 µs |
-| NFC: Khmer (changed in Unicode 17) | String.prototype.normalize | 1.20 µs / 1.39 µs / 1.57 µs |
-| length: Accented Latin | Text.length (same string: cached) | 276 ns / 357 ns / 417 ns |
-| length: Accented Latin | Text.length (1024 strings: uncached) | 300 ns / 355 ns / 368 ns |
-| length: Accented Latin | Intl.Segmenter count | 22.0 µs / 70.9 µs / 84.9 µs |
-| slice(0, 10): Accented Latin | Text.slice (uncached) | 355 ns / 458 ns / 658 ns |
-| slice(0, 10): Accented Latin | Intl.Segmenter slice | 16.6 µs / 20.1 µs / 32.4 µs |
-| NFC: Accented Latin | Text.nfc | 7.57 µs / 9.49 µs / 11.1 µs |
-| NFC: Accented Latin | String.prototype.normalize | 2.46 µs / 3.31 µs / 3.96 µs |
-| length: Japanese 10 KB | Text.length (same string: cached) | 81 ns / 91 ns / 98 ns |
-| length: Japanese 10 KB | Text.length (1024 strings: uncached) | 27.5 µs / 35.8 µs / 37.2 µs |
-| length: Japanese 10 KB | Intl.Segmenter count | 1.51 ms / 1.93 ms / 2.56 ms |
-| slice(0, 10): Japanese 10 KB | Text.slice (uncached) | 389 ns / 481 ns / 724 ns |
-| slice(0, 10): Japanese 10 KB | Intl.Segmenter slice | 44.8 µs / 54.7 µs / 59.9 µs |
-| NFC: Japanese 10 KB | Text.nfc | 25.8 µs / 33.7 µs / 39.0 µs |
-| NFC: Japanese 10 KB | String.prototype.normalize | 18.9 µs / 22.6 µs / 25.1 µs |
+| length: ASCII 21 | Text.length (same string: cached) | 69 ns / 74 ns / 83 ns |
+| length: ASCII 21 | Text.length (1024 strings: uncached) | 78 ns / 84 ns / 93 ns |
+| length: ASCII 21 | Intl.Segmenter count | 5.97 µs / 14.9 µs / 23.3 µs |
+| slice(0, 10): ASCII 21 | Text.slice (uncached) | 112 ns / 122 ns / 132 ns |
+| slice(0, 10): ASCII 21 | Intl.Segmenter slice | 4.73 µs / 15.3 µs / 19.2 µs |
+| NFC: ASCII 21 | Text.nfc | 85 ns / 93 ns / 97 ns |
+| NFC: ASCII 21 | String.prototype.normalize | 104 ns / 113 ns / 115 ns |
+| length: Japanese 20 | Text.length (same string: cached) | 68 ns / 73 ns / 76 ns |
+| length: Japanese 20 | Text.length (1024 strings: uncached) | 75 ns / 86 ns / 90 ns |
+| length: Japanese 20 | Intl.Segmenter count | 6.39 µs / 17.3 µs / 26.6 µs |
+| slice(0, 10): Japanese 20 | Text.slice (uncached) | 113 ns / 129 ns / 135 ns |
+| slice(0, 10): Japanese 20 | Intl.Segmenter slice | 4.93 µs / 14.9 µs / 22.9 µs |
+| NFC: Japanese 20 | Text.nfc | 82 ns / 88 ns / 94 ns |
+| NFC: Japanese 20 | String.prototype.normalize | 113 ns / 135 ns / 145 ns |
+| length: Emoji (ZWJ, flags, skin tones) | Text.length (same string: cached) | 39 ns / 43 ns / 45 ns |
+| length: Emoji (ZWJ, flags, skin tones) | Text.length (1024 strings: uncached) | 730 ns / 925 ns / 970 ns |
+| length: Emoji (ZWJ, flags, skin tones) | Intl.Segmenter count | 7.86 µs / 18.6 µs / 26.9 µs |
+| slice(0, 10): Emoji (ZWJ, flags, skin tones) | Text.slice (uncached) | 937 ns / 1.11 µs / 1.47 µs |
+| slice(0, 10): Emoji (ZWJ, flags, skin tones) | Intl.Segmenter slice | 6.12 µs / 18.4 µs / 28.5 µs |
+| NFC: Emoji (ZWJ, flags, skin tones) | Text.nfc | 352 ns / 378 ns / 412 ns |
+| NFC: Emoji (ZWJ, flags, skin tones) | String.prototype.normalize | 282 ns / 297 ns / 303 ns |
+| length: Khmer (changed in Unicode 17) | Text.length (same string: cached) | 33 ns / 36 ns / 38 ns |
+| length: Khmer (changed in Unicode 17) | Text.length (1024 strings: uncached) | 773 ns / 810 ns / 827 ns |
+| length: Khmer (changed in Unicode 17) | Intl.Segmenter count | 6.03 µs / 20.7 µs / 26.3 µs |
+| slice(0, 10): Khmer (changed in Unicode 17) | Text.slice (uncached) | 906 ns / 1.00 µs / 1.38 µs |
+| slice(0, 10): Khmer (changed in Unicode 17) | Intl.Segmenter slice | 5.91 µs / 17.0 µs / 27.1 µs |
+| NFC: Khmer (changed in Unicode 17) | Text.nfc | 990 ns / 1.06 µs / 1.10 µs |
+| NFC: Khmer (changed in Unicode 17) | String.prototype.normalize | 340 ns / 357 ns / 366 ns |
+| length: Accented Latin | Text.length (same string: cached) | 99 ns / 105 ns / 122 ns |
+| length: Accented Latin | Text.length (1024 strings: uncached) | 105 ns / 113 ns / 118 ns |
+| length: Accented Latin | Intl.Segmenter count | 6.89 µs / 17.1 µs / 27.4 µs |
+| slice(0, 10): Accented Latin | Text.slice (uncached) | 112 ns / 124 ns / 146 ns |
+| slice(0, 10): Accented Latin | Intl.Segmenter slice | 5.26 µs / 18.8 µs / 26.7 µs |
+| NFC: Accented Latin | Text.nfc | 2.04 µs / 2.31 µs / 2.71 µs |
+| NFC: Accented Latin | String.prototype.normalize | 724 ns / 813 ns / 902 ns |
+| length: Japanese 10 KB | Text.length (same string: cached) | 24 ns / 26 ns / 26 ns |
+| length: Japanese 10 KB | Text.length (1024 strings: uncached) | 9.38 µs / 10.5 µs / 10.8 µs |
+| length: Japanese 10 KB | Intl.Segmenter count | 465 µs / 554 µs / 659 µs |
+| slice(0, 10): Japanese 10 KB | Text.slice (uncached) | 122 ns / 155 ns / 305 ns |
+| slice(0, 10): Japanese 10 KB | Intl.Segmenter slice | 15.2 µs / 17.8 µs / 23.0 µs |
+| NFC: Japanese 10 KB | Text.nfc | 8.22 µs / 9.04 µs / 9.56 µs |
+| NFC: Japanese 10 KB | String.prototype.normalize | 6.42 µs / 6.93 µs / 7.26 µs |
 
 ### webkit 26.5 (Text: WASM core, Unicode 17.0.0)
 
 | Operation / string | Method | p50 / p95 / p99 |
 |---|---|---|
-| length: ASCII 21 | Text.length (same string: cached) | 182 ns / 213 ns / 242 ns |
-| length: ASCII 21 | Text.length (1024 strings: uncached) | 209 ns / 249 ns / 404 ns |
-| length: ASCII 21 | Intl.Segmenter count | 16.9 µs / 20.4 µs / 24.6 µs |
-| slice(0, 10): ASCII 21 | Text.slice (uncached) | 1.04 µs / 1.50 µs / 1.77 µs |
-| slice(0, 10): ASCII 21 | Intl.Segmenter slice | 13.2 µs / 18.4 µs / 22.7 µs |
-| NFC: ASCII 21 | Text.nfc | 218 ns / 258 ns / 304 ns |
-| NFC: ASCII 21 | String.prototype.normalize | 102 ns / 117 ns / 132 ns |
-| length: Japanese 20 | Text.length (same string: cached) | 230 ns / 294 ns / 361 ns |
-| length: Japanese 20 | Text.length (1024 strings: uncached) | 274 ns / 345 ns / 356 ns |
-| length: Japanese 20 | Intl.Segmenter count | 17.0 µs / 27.1 µs / 41.2 µs |
-| slice(0, 10): Japanese 20 | Text.slice (uncached) | 1.03 µs / 1.63 µs / 1.89 µs |
-| slice(0, 10): Japanese 20 | Intl.Segmenter slice | 12.3 µs / 18.5 µs / 20.6 µs |
-| NFC: Japanese 20 | Text.nfc | 236 ns / 438 ns / 443 ns |
-| NFC: Japanese 20 | String.prototype.normalize | 370 ns / 442 ns / 449 ns |
-| length: Emoji (ZWJ, flags, skin tones) | Text.length (same string: cached) | 115 ns / 151 ns / 178 ns |
-| length: Emoji (ZWJ, flags, skin tones) | Text.length (1024 strings: uncached) | 10.6 µs / 24.1 µs / 34.3 µs |
-| length: Emoji (ZWJ, flags, skin tones) | Intl.Segmenter count | 19.8 µs / 25.2 µs / 26.3 µs |
-| slice(0, 10): Emoji (ZWJ, flags, skin tones) | Text.slice (uncached) | 13.3 µs / 17.2 µs / 19.2 µs |
-| slice(0, 10): Emoji (ZWJ, flags, skin tones) | Intl.Segmenter slice | 15.5 µs / 21.6 µs / 23.7 µs |
-| NFC: Emoji (ZWJ, flags, skin tones) | Text.nfc | 1.06 µs / 1.37 µs / 1.54 µs |
-| NFC: Emoji (ZWJ, flags, skin tones) | String.prototype.normalize | 695 ns / 828 ns / 845 ns |
-| length: Khmer (changed in Unicode 17) | Text.length (same string: cached) | 91 ns / 111 ns / 129 ns |
-| length: Khmer (changed in Unicode 17) | Text.length (1024 strings: uncached) | 15.1 µs / 18.1 µs / 22.5 µs |
-| length: Khmer (changed in Unicode 17) | Intl.Segmenter count | 20.9 µs / 30.1 µs / 32.5 µs |
-| slice(0, 10): Khmer (changed in Unicode 17) | Text.slice (uncached) | 16.4 µs / 19.6 µs / 22.4 µs |
-| slice(0, 10): Khmer (changed in Unicode 17) | Intl.Segmenter slice | 14.5 µs / 17.5 µs / 21.0 µs |
-| NFC: Khmer (changed in Unicode 17) | Text.nfc | 3.96 µs / 4.78 µs / 5.21 µs |
-| NFC: Khmer (changed in Unicode 17) | String.prototype.normalize | 842 ns / 1.30 µs / 1.85 µs |
-| length: Accented Latin | Text.length (same string: cached) | 216 ns / 276 ns / 290 ns |
-| length: Accented Latin | Text.length (1024 strings: uncached) | 235 ns / 283 ns / 303 ns |
-| length: Accented Latin | Intl.Segmenter count | 19.2 µs / 24.6 µs / 28.0 µs |
-| slice(0, 10): Accented Latin | Text.slice (uncached) | 995 ns / 1.50 µs / 1.60 µs |
-| slice(0, 10): Accented Latin | Intl.Segmenter slice | 12.4 µs / 15.3 µs / 17.3 µs |
-| NFC: Accented Latin | Text.nfc | 9.43 µs / 11.5 µs / 14.1 µs |
-| NFC: Accented Latin | String.prototype.normalize | 4.02 µs / 5.23 µs / 6.38 µs |
-| length: Japanese 10 KB | Text.length (same string: cached) | 64 ns / 75 ns / 92 ns |
-| length: Japanese 10 KB | Text.length (1024 strings: uncached) | 42.1 µs / 48.5 µs / 49.7 µs |
-| length: Japanese 10 KB | Intl.Segmenter count | 1.06 ms / 1.53 ms / 1.75 ms |
-| slice(0, 10): Japanese 10 KB | Text.slice (uncached) | 1.21 µs / 1.65 µs / 1.79 µs |
-| slice(0, 10): Japanese 10 KB | Intl.Segmenter slice | 28.8 µs / 35.2 µs / 38.5 µs |
-| NFC: Japanese 10 KB | Text.nfc | 19.1 µs / 24.0 µs / 26.3 µs |
-| NFC: Japanese 10 KB | String.prototype.normalize | 16.9 µs / 20.3 µs / 20.8 µs |
+| length: ASCII 21 | Text.length (same string: cached) | 55 ns / 60 ns / 62 ns |
+| length: ASCII 21 | Text.length (1024 strings: uncached) | 62 ns / 66 ns / 74 ns |
+| length: ASCII 21 | Intl.Segmenter count | 4.91 µs / 6.31 µs / 7.12 µs |
+| slice(0, 10): ASCII 21 | Text.slice (uncached) | 270 ns / 300 ns / 317 ns |
+| slice(0, 10): ASCII 21 | Intl.Segmenter slice | 3.74 µs / 4.61 µs / 5.05 µs |
+| NFC: ASCII 21 | Text.nfc | 85 ns / 105 ns / 167 ns |
+| NFC: ASCII 21 | String.prototype.normalize | 26 ns / 33 ns / 36 ns |
+| length: Japanese 20 | Text.length (same string: cached) | 73 ns / 83 ns / 103 ns |
+| length: Japanese 20 | Text.length (1024 strings: uncached) | 82 ns / 94 ns / 101 ns |
+| length: Japanese 20 | Intl.Segmenter count | 5.28 µs / 6.35 µs / 6.94 µs |
+| slice(0, 10): Japanese 20 | Text.slice (uncached) | 280 ns / 366 ns / 408 ns |
+| slice(0, 10): Japanese 20 | Intl.Segmenter slice | 4.31 µs / 5.09 µs / 5.71 µs |
+| NFC: Japanese 20 | Text.nfc | 94 ns / 113 ns / 120 ns |
+| NFC: Japanese 20 | String.prototype.normalize | 98 ns / 112 ns / 169 ns |
+| length: Emoji (ZWJ, flags, skin tones) | Text.length (same string: cached) | 33 ns / 41 ns / 43 ns |
+| length: Emoji (ZWJ, flags, skin tones) | Text.length (1024 strings: uncached) | 893 ns / 1.09 µs / 1.30 µs |
+| length: Emoji (ZWJ, flags, skin tones) | Intl.Segmenter count | 5.61 µs / 6.89 µs / 7.67 µs |
+| slice(0, 10): Emoji (ZWJ, flags, skin tones) | Text.slice (uncached) | 1.28 µs / 1.51 µs / 1.71 µs |
+| slice(0, 10): Emoji (ZWJ, flags, skin tones) | Intl.Segmenter slice | 4.29 µs / 5.32 µs / 8.62 µs |
+| NFC: Emoji (ZWJ, flags, skin tones) | Text.nfc | 349 ns / 386 ns / 468 ns |
+| NFC: Emoji (ZWJ, flags, skin tones) | String.prototype.normalize | 192 ns / 216 ns / 310 ns |
+| length: Khmer (changed in Unicode 17) | Text.length (same string: cached) | 28 ns / 31 ns / 34 ns |
+| length: Khmer (changed in Unicode 17) | Text.length (1024 strings: uncached) | 901 ns / 1.06 µs / 1.48 µs |
+| length: Khmer (changed in Unicode 17) | Intl.Segmenter count | 5.96 µs / 7.37 µs / 8.02 µs |
+| slice(0, 10): Khmer (changed in Unicode 17) | Text.slice (uncached) | 1.27 µs / 1.55 µs / 1.66 µs |
+| slice(0, 10): Khmer (changed in Unicode 17) | Intl.Segmenter slice | 4.19 µs / 5.18 µs / 5.66 µs |
+| NFC: Khmer (changed in Unicode 17) | Text.nfc | 1.20 µs / 1.32 µs / 1.51 µs |
+| NFC: Khmer (changed in Unicode 17) | String.prototype.normalize | 233 ns / 291 ns / 372 ns |
+| length: Accented Latin | Text.length (same string: cached) | 68 ns / 85 ns / 119 ns |
+| length: Accented Latin | Text.length (1024 strings: uncached) | 71 ns / 80 ns / 85 ns |
+| length: Accented Latin | Intl.Segmenter count | 5.28 µs / 7.16 µs / 7.79 µs |
+| slice(0, 10): Accented Latin | Text.slice (uncached) | 267 ns / 337 ns / 667 ns |
+| slice(0, 10): Accented Latin | Intl.Segmenter slice | 3.74 µs / 4.72 µs / 5.18 µs |
+| NFC: Accented Latin | Text.nfc | 2.27 µs / 2.48 µs / 2.51 µs |
+| NFC: Accented Latin | String.prototype.normalize | 1.01 µs / 1.15 µs / 1.29 µs |
+| length: Japanese 10 KB | Text.length (same string: cached) | 17 ns / 20 ns / 26 ns |
+| length: Japanese 10 KB | Text.length (1024 strings: uncached) | 10.4 µs / 11.9 µs / 13.4 µs |
+| length: Japanese 10 KB | Intl.Segmenter count | 261 µs / 323 µs / 407 µs |
+| slice(0, 10): Japanese 10 KB | Text.slice (uncached) | 273 ns / 334 ns / 427 ns |
+| slice(0, 10): Japanese 10 KB | Intl.Segmenter slice | 7.58 µs / 10.8 µs / 13.9 µs |
+| NFC: Japanese 10 KB | Text.nfc | 11.4 µs / 14.3 µs / 21.2 µs |
+| NFC: Japanese 10 KB | String.prototype.normalize | 5.19 µs / 6.26 µs / 6.68 µs |
 
 ## Start-up time added by loading the WASM core
 
@@ -284,10 +282,10 @@ The same app is built with and without the core, and the two builds are loaded a
 
 | Browser | Without core p50 / p95 / p99 | With core p50 / p95 / p99 | Difference (p50) | WebAssembly.instantiate p50 / p95 / p99 |
 |---|---|---|---|---|
-| chromium 149.0.7827.55 | 379.0 ms / 513.0 ms / 573.1 ms | 417.5 ms / 544.7 ms / 709.0 ms | 38.5 ms | 5.60 ms / 12.0 ms / 14.3 ms |
-| webkit 26.5 | 222.2 ms / 293.8 ms / 316.3 ms | 282.5 ms / 328.4 ms / 362.3 ms | 60.2 ms | 12.4 ms / 20.0 ms / 24.6 ms |
+| chromium 149.0.7827.55 | 81.6 ms / 86.9 ms / 92.7 ms | 84.5 ms / 87.3 ms / 94.3 ms | 2.90 ms | 0.88 ms / 1.27 ms / 1.32 ms |
+| webkit 26.5 | 37.9 ms / 43.2 ms / 47.0 ms | 46.3 ms / 54.0 ms / 58.3 ms | 8.42 ms | 2.08 ms / 2.68 ms / 4.02 ms |
 
-Node (import in a fresh process): `@seamscript/core` 141.9 ms / 166.9 ms / 226.3 ms; `@seamscript/runtime` alone 28.6 ms / 35.0 ms / 48.2 ms (20 runs each).
+Node (import in a fresh process): `@seamscript/core` 35.7 ms / 38.7 ms / 38.7 ms; `@seamscript/runtime` alone 6.63 ms / 7.91 ms / 8.22 ms (20 runs each).
 
 ## Latency from server send to DOM update
 
@@ -300,79 +298,79 @@ For every price tick, the page records when the WebSocket received it and when t
 
 | Browser | App | Shown/received | Receive→DOM p50 / p95 / p99 | Send→DOM p50 / p95 / p99 | Handler p50 / p99 |
 |---|---|---|---|---|---|
-| chromium 149.0.7827.55 | SeamScript | 300/300 | 4.70 ms / 15.6 ms / 20.0 ms | 8.93 ms / 21.8 ms / 27.2 ms | 0.10 ms / 1.19 ms |
-| chromium 149.0.7827.55 | TypeScript + Zod | 299/300 | 4.75 ms / 15.5 ms / 20.6 ms | 8.21 ms / 22.9 ms / 36.0 ms | 0.13 ms / 2.15 ms |
-| chromium 149.0.7827.55 | TypeScript + Zod | 300/301 | 4.38 ms / 14.9 ms / 17.1 ms | 7.41 ms / 18.5 ms / 26.1 ms | 0.13 ms / 2.08 ms |
-| chromium 149.0.7827.55 | SeamScript | 301/301 | 4.15 ms / 13.3 ms / 17.0 ms | 5.96 ms / 16.7 ms / 20.5 ms | 0.10 ms / 0.87 ms |
-| webkit 26.5 | SeamScript | 286/300 | 32.4 ms / 78.7 ms / 102.7 ms | 38.5 ms / 100.0 ms / 130.6 ms | 0.12 ms / 1.42 ms |
-| webkit 26.5 | TypeScript + Zod | 289/303 | 32.3 ms / 73.5 ms / 95.7 ms | 37.8 ms / 88.5 ms / 126.2 ms | 0.16 ms / 2.40 ms |
-| webkit 26.5 | TypeScript + Zod | 286/300 | 30.5 ms / 74.7 ms / 104.9 ms | 35.7 ms / 86.3 ms / 123.4 ms | 0.16 ms / 2.66 ms |
-| webkit 26.5 | SeamScript | 291/302 | 36.6 ms / 81.2 ms / 138.5 ms | 43.9 ms / 102.0 ms / 149.8 ms | 0.10 ms / 2.36 ms |
+| chromium 149.0.7827.55 | SeamScript | 300/300 | 1.45 ms / 9.26 ms / 13.5 ms | 2.31 ms / 10.2 ms / 14.1 ms | 0.10 ms / 0.23 ms |
+| chromium 149.0.7827.55 | TypeScript + Zod | 300/300 | 1.37 ms / 11.0 ms / 13.6 ms | 2.20 ms / 11.8 ms / 15.3 ms | 0.13 ms / 0.30 ms |
+| chromium 149.0.7827.55 | TypeScript + Zod | 300/300 | 1.37 ms / 10.3 ms / 14.0 ms | 2.19 ms / 11.0 ms / 17.3 ms | 0.13 ms / 0.25 ms |
+| chromium 149.0.7827.55 | SeamScript | 300/300 | 1.56 ms / 8.18 ms / 11.0 ms | 2.40 ms / 9.12 ms / 12.8 ms | 0.10 ms / 0.20 ms |
+| webkit 26.5 | SeamScript | 300/301 | 8.96 ms / 19.5 ms / 27.8 ms | 10.1 ms / 21.7 ms / 32.3 ms | 0.08 ms / 0.24 ms |
+| webkit 26.5 | TypeScript + Zod | 299/300 | 9.36 ms / 20.9 ms / 25.6 ms | 10.1 ms / 22.0 ms / 33.5 ms | 0.12 ms / 0.34 ms |
+| webkit 26.5 | TypeScript + Zod | 299/301 | 8.82 ms / 21.2 ms / 31.6 ms | 9.67 ms / 24.9 ms / 36.1 ms | 0.12 ms / 0.36 ms |
+| webkit 26.5 | SeamScript | 300/301 | 7.96 ms / 16.6 ms / 26.9 ms | 8.92 ms / 20.3 ms / 36.3 ms | 0.08 ms / 0.38 ms |
 
 ### Per frame, 500 messages/s
 
 | Browser | App | Shown/received | Receive→DOM p50 / p95 / p99 | Send→DOM p50 / p95 / p99 | Handler p50 / p99 |
 |---|---|---|---|---|---|
-| chromium 149.0.7827.55 | SeamScript | 2622/3004 | 5.33 ms / 15.5 ms / 25.2 ms | 16.4 ms / 39.8 ms / 56.0 ms | 0.03 ms / 0.25 ms |
-| chromium 149.0.7827.55 | TypeScript + Zod | 2659/3015 | 5.38 ms / 15.3 ms / 20.8 ms | 15.2 ms / 36.1 ms / 50.1 ms | 0.04 ms / 0.50 ms |
-| chromium 149.0.7827.55 | TypeScript + Zod | 2628/3008 | 5.34 ms / 15.4 ms / 24.4 ms | 15.9 ms / 38.6 ms / 50.7 ms | 0.04 ms / 0.25 ms |
-| chromium 149.0.7827.55 | SeamScript | 2647/3008 | 5.43 ms / 14.4 ms / 20.8 ms | 15.2 ms / 36.5 ms / 58.9 ms | 0.03 ms / 0.24 ms |
-| webkit 26.5 | SeamScript | 1482/2984 | 44.7 ms / 111.5 ms / 147.8 ms | 50.3 ms / 137.9 ms / 182.6 ms | 0.02 ms / 0.46 ms |
-| webkit 26.5 | TypeScript + Zod | 1702/3022 | 34.1 ms / 91.2 ms / 117.5 ms | 41.1 ms / 117.6 ms / 167.2 ms | 0.04 ms / 2.24 ms |
-| webkit 26.5 | TypeScript + Zod | 1802/3023 | 31.8 ms / 76.5 ms / 115.5 ms | 37.4 ms / 98.1 ms / 141.8 ms | 0.04 ms / 1.18 ms |
-| webkit 26.5 | SeamScript | 1514/2992 | 39.8 ms / 114.5 ms / 166.2 ms | 46.4 ms / 137.6 ms / 187.4 ms | 0.02 ms / 1.32 ms |
+| chromium 149.0.7827.55 | SeamScript | 2751/3004 | 8.39 ms / 13.6 ms / 14.4 ms | 9.76 ms / 17.5 ms / 18.5 ms | 0.03 ms / 0.11 ms |
+| chromium 149.0.7827.55 | TypeScript + Zod | 2755/3001 | 8.43 ms / 13.5 ms / 14.4 ms | 9.30 ms / 17.2 ms / 18.2 ms | 0.04 ms / 0.10 ms |
+| chromium 149.0.7827.55 | TypeScript + Zod | 2758/3002 | 8.61 ms / 13.6 ms / 14.4 ms | 9.52 ms / 17.4 ms / 18.3 ms | 0.04 ms / 0.12 ms |
+| chromium 149.0.7827.55 | SeamScript | 2734/3000 | 8.45 ms / 13.6 ms / 14.2 ms | 9.71 ms / 17.7 ms / 19.3 ms | 0.03 ms / 0.12 ms |
+| webkit 26.5 | SeamScript | 2711/3003 | 8.18 ms / 16.4 ms / 25.1 ms | 9.19 ms / 21.0 ms / 32.2 ms | 0.02 ms / 0.12 ms |
+| webkit 26.5 | TypeScript + Zod | 2681/2995 | 9.26 ms / 18.1 ms / 26.8 ms | 10.5 ms / 23.4 ms / 34.5 ms | 0.02 ms / 0.16 ms |
+| webkit 26.5 | TypeScript + Zod | 2661/3006 | 9.84 ms / 21.1 ms / 28.8 ms | 11.1 ms / 26.5 ms / 40.1 ms | 0.02 ms / 0.18 ms |
+| webkit 26.5 | SeamScript | 2678/3002 | 9.84 ms / 20.4 ms / 27.3 ms | 10.8 ms / 25.9 ms / 37.3 ms | 0.02 ms / 0.14 ms |
 
 ### Per frame, 2000 messages/s
 
 | Browser | App | Shown/received | Receive→DOM p50 / p95 / p99 | Send→DOM p50 / p95 / p99 | Handler p50 / p99 |
 |---|---|---|---|---|---|
-| chromium 149.0.7827.55 | SeamScript | 6263/12025 | 6.30 ms / 17.2 ms / 26.9 ms | 22.1 ms / 55.2 ms / 80.5 ms | 0.02 ms / 0.09 ms |
-| chromium 149.0.7827.55 | TypeScript + Zod | 6595/12060 | 5.80 ms / 14.4 ms / 21.0 ms | 21.2 ms / 48.5 ms / 62.2 ms | 0.03 ms / 0.10 ms |
-| chromium 149.0.7827.55 | TypeScript + Zod | 5305/12178 | 7.71 ms / 21.8 ms / 33.0 ms | 30.5 ms / 72.6 ms / 93.4 ms | 0.03 ms / 0.15 ms |
-| chromium 149.0.7827.55 | SeamScript | 5156/12084 | 8.54 ms / 25.0 ms / 40.6 ms | 33.4 ms / 73.3 ms / 93.9 ms | 0.03 ms / 0.17 ms |
-| webkit 26.5 | SeamScript | 2410/12112 | 23.5 ms / 59.9 ms / 75.5 ms | 26.0 ms / 70.0 ms / 91.8 ms | 0.02 ms / 0.34 ms |
-| webkit 26.5 | TypeScript + Zod | 2834/12020 | 18.7 ms / 50.0 ms / 84.1 ms | 22.4 ms / 64.2 ms / 91.5 ms | 0.02 ms / 0.34 ms |
-| webkit 26.5 | TypeScript + Zod | 2885/12099 | 18.0 ms / 46.7 ms / 61.6 ms | 21.9 ms / 59.2 ms / 79.6 ms | 0.02 ms / 0.20 ms |
-| webkit 26.5 | SeamScript | 2280/12040 | 23.5 ms / 60.5 ms / 85.6 ms | 27.3 ms / 72.6 ms / 99.9 ms | 0.02 ms / 0.22 ms |
+| chromium 149.0.7827.55 | SeamScript | 8019/11999 | 6.18 ms / 13.0 ms / 16.5 ms | 11.6 ms / 25.4 ms / 32.8 ms | 0.03 ms / 0.12 ms |
+| chromium 149.0.7827.55 | TypeScript + Zod | 7925/12020 | 6.46 ms / 13.0 ms / 15.7 ms | 11.1 ms / 28.3 ms / 38.4 ms | 0.03 ms / 0.13 ms |
+| chromium 149.0.7827.55 | TypeScript + Zod | 8072/12039 | 6.04 ms / 12.9 ms / 15.5 ms | 12.0 ms / 27.2 ms / 35.6 ms | 0.03 ms / 0.10 ms |
+| chromium 149.0.7827.55 | SeamScript | 7937/11998 | 6.04 ms / 14.0 ms / 16.9 ms | 12.6 ms / 29.2 ms / 40.8 ms | 0.03 ms / 0.10 ms |
+| webkit 26.5 | SeamScript | 6782/11997 | 10.3 ms / 18.3 ms / 24.2 ms | 11.3 ms / 26.1 ms / 33.8 ms | 0.02 ms / 0.08 ms |
+| webkit 26.5 | TypeScript + Zod | 6355/12042 | 10.3 ms / 20.1 ms / 27.3 ms | 11.7 ms / 28.2 ms / 34.9 ms | 0.02 ms / 0.10 ms |
+| webkit 26.5 | TypeScript + Zod | 6866/12033 | 9.20 ms / 18.1 ms / 24.0 ms | 10.3 ms / 24.9 ms / 33.1 ms | 0.02 ms / 0.10 ms |
+| webkit 26.5 | SeamScript | 6597/12026 | 10.1 ms / 19.0 ms / 25.5 ms | 11.3 ms / 26.4 ms / 33.2 ms | 0.02 ms / 0.08 ms |
 
 ### Per message, 50 messages/s
 
 | Browser | App | Shown/received | Receive→DOM p50 / p95 / p99 | Send→DOM p50 / p95 / p99 | Handler p50 / p99 |
 |---|---|---|---|---|---|
-| chromium 149.0.7827.55 | SeamScript | 301/301 | 1.16 ms / 3.68 ms / 4.91 ms | 3.48 ms / 16.2 ms / 25.7 ms | 0.11 ms / 1.58 ms |
-| chromium 149.0.7827.55 | TypeScript + Zod | 301/301 | 1.08 ms / 4.19 ms / 7.88 ms | 2.87 ms / 15.1 ms / 23.0 ms | 0.14 ms / 1.98 ms |
-| chromium 149.0.7827.55 | TypeScript + Zod | 301/301 | 1.10 ms / 4.44 ms / 7.54 ms | 4.37 ms / 20.3 ms / 28.5 ms | 0.14 ms / 3.10 ms |
-| chromium 149.0.7827.55 | SeamScript | 302/302 | 1.27 ms / 5.24 ms / 6.98 ms | 6.14 ms / 25.2 ms / 37.3 ms | 0.11 ms / 3.69 ms |
-| webkit 26.5 | SeamScript | 300/300 | 1.16 ms / 3.78 ms / 6.04 ms | 3.74 ms / 14.8 ms / 20.3 ms | 0.12 ms / 1.66 ms |
-| webkit 26.5 | TypeScript + Zod | 300/300 | 1.08 ms / 2.44 ms / 3.80 ms | 3.36 ms / 15.2 ms / 30.1 ms | 0.16 ms / 1.58 ms |
-| webkit 26.5 | TypeScript + Zod | 301/301 | 1.08 ms / 2.16 ms / 3.96 ms | 3.13 ms / 11.8 ms / 21.4 ms | 0.18 ms / 1.50 ms |
-| webkit 26.5 | SeamScript | 300/300 | 1.08 ms / 2.64 ms / 4.24 ms | 3.25 ms / 13.3 ms / 22.6 ms | 0.12 ms / 0.64 ms |
+| chromium 149.0.7827.55 | SeamScript | 300/300 | 0.85 ms / 1.40 ms / 1.69 ms | 1.59 ms / 2.81 ms / 3.74 ms | 0.09 ms / 0.26 ms |
+| chromium 149.0.7827.55 | TypeScript + Zod | 300/300 | 0.53 ms / 0.94 ms / 1.34 ms | 1.00 ms / 1.67 ms / 3.13 ms | 0.08 ms / 0.36 ms |
+| chromium 149.0.7827.55 | TypeScript + Zod | 301/301 | 0.55 ms / 1.13 ms / 1.30 ms | 1.03 ms / 2.22 ms / 3.97 ms | 0.09 ms / 0.28 ms |
+| chromium 149.0.7827.55 | SeamScript | 301/301 | 0.96 ms / 1.30 ms / 1.62 ms | 1.79 ms / 2.46 ms / 5.89 ms | 0.10 ms / 0.22 ms |
+| webkit 26.5 | SeamScript | 300/300 | 0.78 ms / 1.44 ms / 4.76 ms | 1.68 ms / 5.71 ms / 19.8 ms | 0.08 ms / 0.34 ms |
+| webkit 26.5 | TypeScript + Zod | 300/300 | 0.74 ms / 1.30 ms / 1.94 ms | 1.55 ms / 4.21 ms / 9.51 ms | 0.14 ms / 0.60 ms |
+| webkit 26.5 | TypeScript + Zod | 300/300 | 0.80 ms / 1.48 ms / 2.64 ms | 1.74 ms / 4.70 ms / 8.91 ms | 0.14 ms / 0.88 ms |
+| webkit 26.5 | SeamScript | 300/300 | 0.80 ms / 1.42 ms / 2.26 ms | 1.74 ms / 4.27 ms / 7.78 ms | 0.08 ms / 0.28 ms |
 
 ### Per message, 500 messages/s
 
 | Browser | App | Shown/received | Receive→DOM p50 / p95 / p99 | Send→DOM p50 / p95 / p99 | Handler p50 / p99 |
 |---|---|---|---|---|---|
-| chromium 149.0.7827.55 | SeamScript | 3006/3006 | 0.52 ms / 1.09 ms / 1.78 ms | 4.52 ms / 32.4 ms / 47.0 ms | 0.05 ms / 0.14 ms |
-| chromium 149.0.7827.55 | TypeScript + Zod | 3000/3000 | 0.51 ms / 1.16 ms / 2.38 ms | 7.93 ms / 36.2 ms / 49.7 ms | 0.06 ms / 0.29 ms |
-| chromium 149.0.7827.55 | TypeScript + Zod | 3001/3001 | 0.50 ms / 1.06 ms / 1.86 ms | 6.23 ms / 27.5 ms / 36.1 ms | 0.06 ms / 0.28 ms |
-| chromium 149.0.7827.55 | SeamScript | 3006/3006 | 0.53 ms / 1.06 ms / 2.06 ms | 6.37 ms / 29.8 ms / 46.2 ms | 0.05 ms / 0.20 ms |
-| webkit 26.5 | SeamScript | 3032/3032 | 0.52 ms / 1.44 ms / 3.24 ms | 8.81 ms / 42.6 ms / 85.4 ms | 0.04 ms / 0.46 ms |
-| webkit 26.5 | TypeScript + Zod | 3398/3398 | 0.44 ms / 1.46 ms / 3.80 ms | 13.0 ms / 587.5 ms / 749.8 ms | 0.06 ms / 0.50 ms |
-| webkit 26.5 | TypeScript + Zod | 3006/3006 | 0.46 ms / 1.20 ms / 2.70 ms | 6.23 ms / 22.4 ms / 34.0 ms | 0.06 ms / 0.22 ms |
-| webkit 26.5 | SeamScript | 3013/3013 | 0.52 ms / 1.14 ms / 2.16 ms | 5.49 ms / 22.6 ms / 34.1 ms | 0.04 ms / 0.36 ms |
+| chromium 149.0.7827.55 | SeamScript | 3000/3000 | 0.27 ms / 0.52 ms / 0.76 ms | 0.97 ms / 4.47 ms / 6.65 ms | 0.03 ms / 0.06 ms |
+| chromium 149.0.7827.55 | TypeScript + Zod | 3001/3001 | 0.25 ms / 0.44 ms / 0.55 ms | 0.91 ms / 3.80 ms / 5.18 ms | 0.03 ms / 0.08 ms |
+| chromium 149.0.7827.55 | TypeScript + Zod | 3000/3000 | 0.26 ms / 0.46 ms / 0.56 ms | 0.96 ms / 4.10 ms / 5.44 ms | 0.03 ms / 0.08 ms |
+| chromium 149.0.7827.55 | SeamScript | 3000/3000 | 0.28 ms / 0.49 ms / 0.58 ms | 0.98 ms / 4.18 ms / 5.58 ms | 0.03 ms / 0.07 ms |
+| webkit 26.5 | SeamScript | 3000/3000 | 0.32 ms / 0.74 ms / 1.14 ms | 2.32 ms / 8.49 ms / 13.5 ms | 0.02 ms / 0.14 ms |
+| webkit 26.5 | TypeScript + Zod | 3002/3002 | 0.30 ms / 0.72 ms / 1.06 ms | 2.26 ms / 8.78 ms / 12.8 ms | 0.04 ms / 0.16 ms |
+| webkit 26.5 | TypeScript + Zod | 3004/3004 | 0.28 ms / 0.70 ms / 1.22 ms | 2.19 ms / 8.59 ms / 12.4 ms | 0.04 ms / 0.20 ms |
+| webkit 26.5 | SeamScript | 3005/3005 | 0.32 ms / 0.76 ms / 1.38 ms | 2.32 ms / 8.73 ms / 12.8 ms | 0.02 ms / 0.14 ms |
 
 ### Per message, 1000 messages/s
 
 | Browser | App | Shown/received | Receive→DOM p50 / p95 / p99 | Send→DOM p50 / p95 / p99 | Handler p50 / p99 |
 |---|---|---|---|---|---|
-| chromium 149.0.7827.55 | SeamScript | 6058/6058 | 0.45 ms / 0.66 ms / 0.92 ms | 19.1 ms / 32.5 ms / 42.4 ms | 0.04 ms / 0.09 ms |
-| chromium 149.0.7827.55 | TypeScript + Zod | 6015/6015 | 0.42 ms / 0.65 ms / 1.09 ms | 19.2 ms / 36.5 ms / 52.7 ms | 0.04 ms / 0.12 ms |
-| chromium 149.0.7827.55 | TypeScript + Zod | 6030/6030 | 0.41 ms / 0.66 ms / 1.10 ms | 20.1 ms / 38.7 ms / 46.2 ms | 0.05 ms / 0.12 ms |
-| chromium 149.0.7827.55 | SeamScript | 6016/6016 | 0.50 ms / 0.89 ms / 2.27 ms | 97.1 ms / 254.7 ms / 266.2 ms | 0.04 ms / 0.13 ms |
-| webkit 26.5 | SeamScript | 6760/6760 | 0.40 ms / 0.76 ms / 1.38 ms | 125.4 ms / 771.6 ms / 800.7 ms | 0.04 ms / 0.16 ms |
-| webkit 26.5 | TypeScript + Zod | 7390/7390 | 0.34 ms / 0.68 ms / 1.18 ms | 388.3 ms / 1311.7 ms / 1379.5 ms | 0.04 ms / 0.34 ms |
-| webkit 26.5 | TypeScript + Zod | 7069/7069 | 0.36 ms / 0.78 ms / 2.06 ms | 1988.6 ms / 2403.8 ms / 2433.3 ms | 0.04 ms / 0.16 ms |
-| webkit 26.5 | SeamScript | 5982/5982 | 0.44 ms / 1.06 ms / 2.04 ms | 2302.2 ms / 2492.3 ms / 2531.7 ms | 0.02 ms / 0.12 ms |
+| chromium 149.0.7827.55 | SeamScript | 6003/6003 | 0.19 ms / 0.40 ms / 0.63 ms | 1.09 ms / 4.83 ms / 9.27 ms | 0.02 ms / 0.07 ms |
+| chromium 149.0.7827.55 | TypeScript + Zod | 6002/6002 | 0.19 ms / 0.52 ms / 0.75 ms | 1.24 ms / 9.07 ms / 13.5 ms | 0.02 ms / 0.09 ms |
+| chromium 149.0.7827.55 | TypeScript + Zod | 6006/6006 | 0.19 ms / 0.57 ms / 0.74 ms | 1.30 ms / 8.72 ms / 11.8 ms | 0.02 ms / 0.08 ms |
+| chromium 149.0.7827.55 | SeamScript | 6007/6007 | 0.20 ms / 0.56 ms / 0.73 ms | 1.31 ms / 8.02 ms / 10.9 ms | 0.02 ms / 0.07 ms |
+| webkit 26.5 | SeamScript | 6003/6003 | 0.26 ms / 0.58 ms / 0.84 ms | 3.13 ms / 11.1 ms / 16.4 ms | 0.02 ms / 0.10 ms |
+| webkit 26.5 | TypeScript + Zod | 6015/6015 | 0.22 ms / 0.56 ms / 0.82 ms | 3.21 ms / 11.1 ms / 14.9 ms | 0.02 ms / 0.14 ms |
+| webkit 26.5 | TypeScript + Zod | 6008/6008 | 0.24 ms / 0.58 ms / 0.90 ms | 3.50 ms / 11.7 ms / 18.8 ms | 0.02 ms / 0.14 ms |
+| webkit 26.5 | SeamScript | 5991/5991 | 0.26 ms / 0.60 ms / 0.88 ms | 3.72 ms / 12.5 ms / 17.2 ms | 0.02 ms / 0.10 ms |
 
 ## `seamc check` and `tsc` times (hyperfine)
 
@@ -380,14 +378,14 @@ To compare the same program, the baseline is `tsc --noEmit` run on the plain TS 
 
 | Command | Mean ± std dev | Median | Min–max | Ratio | Runs |
 |---|---|---|---|---|---|
-| seamc check (app) | 7.680 s ± 0.794 | 7.545 s | 6.362–9.164 s | 1.19× | 10 |
-| tsc --noEmit (app, as plain TS) | 6.458 s ± 0.669 | 6.432 s | 5.468–7.261 s | 1.00× | 10 |
-| tsc --noEmit (TS + Zod twin) | 8.317 s ± 1.185 | 7.768 s | 7.099–10.112 s | 1.29× | 10 |
+| seamc check (app) | 2.388 s ± 0.372 | 2.359 s | 1.982–2.939 s | 1.20× | 10 |
+| tsc --noEmit (app, as plain TS) | 1.987 s ± 0.175 | 2.037 s | 1.554–2.170 s | 1.00× | 10 |
+| tsc --noEmit (TS + Zod twin) | 2.101 s ± 0.166 | 2.092 s | 1.910–2.481 s | 1.06× | 10 |
 
 ## Bundle size (the JS and CSS that index.html loads)
 
 | Build | Raw | gzip | brotli | Difference from TS + Zod (gzip) |
 |---|---|---|---|---|
-| SeamScript (WASM core) | 512.8 KB | 190.2 KB | 166.8 KB | +91.3 KB |
-| SeamScript (no core) | 259.2 KB | 81.7 KB | 70.7 KB | -17.2 KB |
-| TypeScript + Zod | 327.7 KB | 98.9 KB | 85.7 KB | +0.0 KB |
+| SeamScript (WASM core) | 499.3 KB | 171.5 KB | 152.3 KB | +73.2 KB |
+| SeamScript (no core) | 258.8 KB | 81.1 KB | 70.3 KB | -17.3 KB |
+| TypeScript + Zod | 327.4 KB | 98.4 KB | 85.4 KB | +0.0 KB |

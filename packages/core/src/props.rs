@@ -1,11 +1,10 @@
 //! Per-code-point facts that let the JavaScript side skip WebAssembly for most
 //! text without changing a single result. `examples/tables.rs` writes them to
-//! `js/tables.ts`; they are derived from this crate's own dependencies, so they
-//! describe exactly the Unicode version the WASM core implements.
+//! `js/tables.ts`; they are derived from this crate's own normalization and
+//! segmentation, so they describe exactly what the WASM core does.
 
 use unicode_normalization::char::canonical_combining_class;
 use unicode_normalization::{IsNormalized, is_nfc_quick, is_nfd_quick};
-use unicode_segmentation::UnicodeSegmentation;
 
 /// A string made only of such characters is already NFC: canonical combining
 /// class 0 and NFC_Quick_Check=Yes, which is the quick check of UAX #15
@@ -23,7 +22,7 @@ const SOLO_REPRESENTATIVES: [char; 5] = ['a', '\n', '\u{1}', '\u{AC00}', '\u{AC0
 
 fn clusters(chars: &[char]) -> usize {
     let s: String = chars.iter().collect();
-    s.graphemes(true).count()
+    crate::grapheme_count(&s)
 }
 
 /// Whether `c` breaks from each representative on both sides and from itself.

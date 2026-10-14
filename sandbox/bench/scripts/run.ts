@@ -51,6 +51,9 @@ results["meta"] = {
   cores: cpus().length,
   memoryGiB: Math.round(totalmem() / 2 ** 30),
   node: process.version,
+  // Intl.Segmenter, the Text baseline, follows the Unicode version of Node's ICU.
+  icu: process.versions.icu,
+  unicode: process.versions.unicode,
   commit: execSync("git rev-parse --short HEAD", { cwd: sandbox, encoding: "utf8" }).trim(),
   dirty: execSync("git status --porcelain", { cwd: sandbox, encoding: "utf8" }).trim() !== "",
   // Other programs on the machine move absolute times (ratios much less): recorded with the run.

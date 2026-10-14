@@ -9,9 +9,13 @@ license = "MIT"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-# Exact versions: both must implement the same Unicode version, which is what
-# makes "one character" mean the same thing in the browser and on a backend.
+# An exact version: its Unicode version must match src/gcb_table.rs (checked at
+# compile time), which is what makes "one character" mean the same thing in the
+# browser and on a backend.
 unicode-normalization = "=0.1.25"
+
+[dev-dependencies]
+# The reference that src/segment.rs is tested against, at the same Unicode version.
 unicode-segmentation = "=1.13.3"
 
 [profile.release]

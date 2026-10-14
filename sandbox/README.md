@@ -116,14 +116,14 @@ Every scenario checks that:
 
 ## Results
 
-Intel Core i7-8550U (8 cores), Node 24.18, Chromium 149 / Firefox 151 / WebKit 26.5 (all headless, Playwright 1.61.1). E2E in 3 browsers; benchmarks in Chromium, WebKit and Node. The first trial ran on 2026-10-12; the benchmarks after the speed work and editor support ran on 2026-10-14 (other applications were using the CPU and the load average was 12 to 28; absolute values are inflated, so read them as ratios to the baseline). The full tables are in [RESULTS.md](RESULTS.md).
+Intel Core i7-8550U (8 cores), Node 24.18, Chromium 149 / Firefox 151 / WebKit 26.5 (all headless, Playwright 1.61.1). E2E in 3 browsers; benchmarks in Chromium, WebKit and Node. Every comparison is a ratio to a baseline measured in the same run. The full tables are in [RESULTS.md](RESULTS.md).
 
 ### 1. Can you write a frontend in it? Yes
 
-- The app is 1,515 lines of `.seam.ts` / `.seam.tsx` only (React 19 + Vite 8). `seamc check` passed from the start. Introducing a violation stops it with SEAM2001 / SEAM2101.
+- The app is 1,515 lines of `.seam.ts` / `.seam.tsx` only (React 19 + Vite 8). `seamc check` passes, and introducing a violation stops it with SEAM2001 / SEAM2101.
 - The production build runs on the WASM core (Unicode 17.0.0) in all 3 browsers. Inside the browser it passes all of the official Unicode 17.0.0 test data (766 grapheme cases, 20,034 normalization lines). On the same data, the browsers' own ICU passes everything in Chromium 149 and Firefox 151, but **WebKit 26.5 is at the level of Unicode 16** (graphemes 756/766, normalization 19,872/20,034).
 - The same features take 1,260 lines in TS + Zod. The SeamScript version is longer because of validation the TS version doesn't do (Int64, Decimal, Zoned, Text normalization), the start-up check with `Text.status`, and the like.
-- What was missing went into the runtime, not the syntax (`Decimal.add/sub/mul`, `Text.status`, and later `Decimal.div/round`). One parser bug was fixed (a decode target that starts with a literal).
+- What the app needs beyond the five constructs lives in the runtime, not the syntax (`Decimal.add/sub/mul/div/round`, `Text.status`).
 - **It works in the editor too**: a stock TS server reads `.seam.ts` as plain TS, so in this app 14 of 15 files show errors (151 syntax, 366 type) and type information is lost. With the tsserver plugin (`packages/ts-plugin`; in VS Code, the `packages/vscode` extension) the count drops to 0, and completion, type display, go to definition and rename work through `boundary` and `decode` (see the editor-support section of DECISIONS.md).
 
 ### 2. IO: broken data doesn't bring it down; it says why and catches up
@@ -133,27 +133,27 @@ The E2E suite is 31 scenarios × 3 browsers = 93 tests, and all of them pass. No
 - Broken JSON, binary frames and schema changes (UUID order IDs, numeric prices) are rejected with a reason (path, expected type, actual type). The gaps that the rejections leave are filled by the snapshot.
 - Alternative encodings of the same value (numeric IDs, NFD, times in UTC or India time, trailing zeros) are read as the same value and not reported as problems.
 - Order IDs above 2^53, quantities and prices stay exact in both directions. When a 500 comes back after the order was created, the app resends with the same `clientOrderId`, and there is still only one order.
-- Client and server count the memo's characters with the same core. A memo of 14 copies of the Khmer "ស្ត្រី" is 14 characters under Unicode 17 and 42 under Unicode 16. Counted with Intl.Segmenter, it is 14 in Chromium and Firefox, **42 in WebKit**, and 42 on the server too (Node's ICU is 16.0). Checking the 32-character limit with Intl would reject the input only in Safari, and the server would reject an order that Chrome accepted. With the core, all 3 browsers and the server agree on 14. When CSP forbids WASM, the app shows a halt screen instead of falling back to the browser's ICU.
-- Large data: with a snapshot of 20,000 orders, it takes about 2.2 seconds from opening the page to going real-time (2026-10-12; 4.8 to 6.8 seconds on the heavily loaded 2026-10-14). Nesting 100,000 levels deep gets through `JSON.parse` in all 3 browsers, and decode ignores it as an extra field. Typing one grapheme of 100,000 characters into the memo takes 0.4 to 1.3 seconds until the character count appears (1.3 to 2.2 seconds on 2026-10-14). The Text operations themselves take 70ms for `Text.nfc` and 28ms for `Text.length` in Node; the rest is the browser's input handling and rendering.
+- Client and server count the memo's characters with the same core. A memo of 14 copies of the Khmer "ស្ត្រី" is 14 characters under Unicode 17 and 42 under Unicode 16. Counted with Intl.Segmenter, it is 14 in Chromium and Firefox, **42 in WebKit**, and 42 on a server whose Node uses an older ICU (Unicode 16.0, as the nixpkgs build here does). Checking the 32-character limit with Intl would reject the input only in Safari, and the server would reject an order that Chrome accepted. With the core, all 3 browsers and the server agree on 14. When CSP forbids WASM, the app shows a halt screen instead of falling back to the browser's ICU.
+- Large data: with a snapshot of 20,000 orders, it takes about 2.2 seconds from opening the page to going real-time. Nesting 100,000 levels deep gets through `JSON.parse` in all 3 browsers, and decode ignores it as an extra field. Typing one grapheme of 100,000 characters into the memo takes 0.4 to 1.3 seconds until the character count appears. The Text operations themselves take 70ms for `Text.nfc` and 28ms for `Text.length` in Node; the rest is the browser's input handling and rendering.
 
 ### 3. Real-time sync: converges under latency, reordering, loss and disconnects
 
 - It converges under each of: latency and jitter, reordering, duplicates, loss, disconnects (with close / TCP only), server restarts, silence, and all of them at once. While disconnected or silent, values are labelled "as of seq N" and never presented as real-time.
-- **A design problem we found**: at first the app rendered React on every message. At around 1,000 messages per second the main thread saturated, and WebSocket messages piled up in the page's event queue. The time from send to display kept growing, into seconds (p50 1.3 to 1.8 seconds). The app's own "server seq − applied seq" couldn't see this backlog, so at first it wrongly looked as if the app was keeping up. Batching notifications to the UI to once per frame brought send to display down to p95 20 to 60ms, even at 2,000 messages per second.
+- **State updates on every message; the UI is notified once per frame.** Rendering on every message saturates the main thread at around 1,000 messages per second and lets WebSocket messages pile up in the page's event queue. With per-frame notification, send to display stays at p95 25 to 30ms even at 2,000 messages per second. Lag is measured from the server's send time, because the app's own "server seq − applied seq" can't see messages still waiting in the event queue.
 - The language guarantees only that everything goes through decode and that `latest` discards stale answers. Ordering and convergence are handled by the app's design (seq, holding, gap timeouts, heartbeats, snapshots). Nothing turned up that the language itself should add.
 
 ### 4. Responsiveness
 
-| Item | Result (ratio to the baseline, 2026-10-14) |
+| Item | Result (ratio to the baseline measured in the same run) |
 |---|---|
-| decode (Node) | 0.44–0.59× Zod with the same checks (two runs on the final code). 0.99–1.21× the TS app's plain Zod, which does no bigint conversion and no decimal, time or Text normalization (about the same speed while doing more work). Before optimization: 1.04–1.26× Zod with the same checks |
-| decode (browser) | 0.21–0.39× Zod with the same checks. Before optimization: 0.54–1.18× |
-| Text.length (uncached) | Faster than counting with Intl.Segmenter in every environment and on every string (0.01–0.76×). Japanese and ASCII are answered in JS alone, in 0.1–0.5µs. Emoji and Khmer, which go through WASM, are still 0.4–0.8×. Before optimization: 0.45–0.94× |
-| Text.slice(t, 0, 10) (uncached) | 0.01–1.13× iterating with Intl. Even on a 10KB string it processes only the first 10 graphemes, so 0.01–0.04× (before optimization it was 14–36× slower) |
-| Text.nfc | 0.64–4.7× native `normalize`. Japanese, ASCII and emoji are 0.6–2.1× (answered in JS alone); strings with characters that normalization can change (Khmer, Latin with combining characters) are 2.3–4.7× (they go through WASM's quick check and normalization). Before optimization: 11–36× (up to 75× on ASCII) |
-| Server send to display | p95 ratio to the TS + Zod version: Chromium 0.95–1.03, WebKit 1.13–1.17 (WebKit was measured again after a run disturbed by load; see the top of RESULTS.md). Decoding and applying one message takes 0.02–0.14ms, with no difference between the two |
-| WASM core start-up cost | Time to the start of main becomes 1.10× in Chromium and 1.27× in WebKit (in this run load inflated the absolute cost to 38–60ms; on the lightly loaded 2026-10-12 it was 3–9ms) |
-| `seamc check` | 1.19–1.36× tsc on the same program (before optimization: 1.77×). A `--watch` recheck takes about 1.3 seconds (the first check about 2.7 seconds) |
-| Bundle (gzip) | 81.7KB without the core, 17KB smaller than the TS + Zod version (98.9KB). The core adds 108.5KB (190.2KB in total). That is 6KB more than before optimization, for the fast-path tables and the quick check |
+| decode (Node) | 0.53–0.59× Zod with the same checks. 1.09–1.13× the TS app's plain Zod, which does no bigint conversion and no decimal, time or Text normalization |
+| decode (browser) | 0.21–0.38× Zod with the same checks, 0.36–0.57× the TS app's plain Zod |
+| Text.length (uncached) | 0.01–0.16× counting with Intl.Segmenter, in every environment and on every string. Japanese, ASCII and Latin text are answered in JS alone (0.01–0.04×); emoji and Khmer go through the WASM core's segmentation (0.09–0.16×; 0.15–0.22× against the official Node 24.18, whose ICU implements Unicode 17) |
+| Text.slice(t, 0, 10) (uncached) | 0.01–0.30× iterating with Intl. On a 10KB string it processes only the first 10 graphemes (0.01–0.04×) |
+| Text.nfc | 0.73–5.1× native `normalize`. Text answered in JS alone takes tens to hundreds of nanoseconds (0.73–3.3×); strings with characters that normalization can change (Khmer, Latin with combining characters) go through WASM's quick check and normalization (2.3–5.1×) |
+| Server send to display | p95 ratio to the TS + Zod version: Chromium 0.86–1.03, WebKit 0.87–0.98. Decoding and applying one message takes 0.02–0.13ms in both |
+| WASM core start-up cost | Time to the start of main becomes 1.04× in Chromium (+2.9ms) and 1.22× in WebKit (+8.4ms). `WebAssembly.instantiate` itself takes 0.9ms / 2.1ms |
+| `seamc check` | 1.20× tsc on the same program. A `--watch` recheck takes about 1.3 seconds (the first check about 2.7 seconds) |
+| Bundle (gzip) | 81.1KB without the core, 17KB smaller than the TS + Zod version (98.4KB). The core adds 90.5KB (171.5KB in total) |
 
 The budgets (`bench/budgets.json`) hold the values above as ratios to baselines measured in the same run. CI runs them with `--quick` and fails if any budget is exceeded.
