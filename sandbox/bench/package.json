@@ -1,0 +1,23 @@
+{
+  "name": "@seamscript-sandbox/bench",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Benchmarks of the sandbox: decode, Text, WASM load, latency to the DOM, seamc check, bundle size",
+  "type": "module",
+  "scripts": {
+    "bench": "node scripts/run.ts",
+    "budgets": "node scripts/check-budgets.ts"
+  },
+  "dependencies": {
+    "@seamscript/core": "0.0.0",
+    "@seamscript/runtime": "0.0.0",
+    "zod": "4.6.6"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.61.1",
+    "@seamscript/compiler": "0.0.0",
+    "@types/node": "24.19.2",
+    "typescript": "5.9.3",
+    "vite": "8.3.4"
+  }
+}

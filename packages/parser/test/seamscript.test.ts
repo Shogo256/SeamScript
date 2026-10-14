@@ -72,6 +72,15 @@ describe("decode", () => {
     });
   });
 
+  it("accepts a target that starts with a literal", () => {
+    expect(shape(expr(`decode "buy" | "sell" | null from v`))).toMatchObject({
+      type: "SeamDecodeExpression",
+      typeAnnotation: { type: "TSUnionType", types: [{ type: "TSLiteralType" }, { type: "TSLiteralType" }, { type: "TSNullKeyword" }] },
+    });
+    expect(shape(expr("decode 'a' from v"))).toMatchObject({ typeAnnotation: { type: "TSLiteralType" } });
+    expect(shape(expr("decode 1 | 2 from v"))).toMatchObject({ typeAnnotation: { type: "TSUnionType" } });
+  });
+
   it("binds like await: the operand is a unary expression", () => {
     expect(shape(expr("decode A from a ?? b"))).toMatchObject({
       type: "LogicalExpression",
@@ -81,6 +90,15 @@ describe("decode", () => {
       type: "SeamDecodeExpression",
       argument: { type: "MemberExpression" },
     });
+  });
+
+  it("takes a parenthesized target when `from` follows on the same line", () => {
+    expect(shape(expr("decode (Order | null)[] from v"))).toMatchObject({
+      type: "SeamDecodeExpression",
+      typeAnnotation: { type: "TSArrayType" },
+      argument: { type: "Identifier", name: "v" },
+    });
+    expect(shape(expr("decode (string) from v"))).toMatchObject({ type: "SeamDecodeExpression" });
   });
 
   it("works inside JSX files", () => {
@@ -118,6 +136,10 @@ describe("the keywords remain identifiers everywhere else", () => {
     "latest\nasync function f() {}",
     "const latest = 1, async = 2; latest; async;",
     "decode ? a : b;",
+    "decode`x`; decode - 1; decode\n\"a\";",
+    // Calls: a parenthesis starts a decode target only when `from` follows on the line.
+    "decode (x); decode (a, b) + 1; decode((a: string) => 1); decode (x)\nfrom(y);",
+    "decode (x) ? from : y; const from = 1; decode (from);",
     "obj.decode; obj.boundary; obj.latest; ({ decode, boundary, latest });",
     "class C { decode() {} boundary = 1; latest() {} }",
     "type T = { decode: string; boundary: number };",

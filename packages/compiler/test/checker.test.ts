@@ -154,3 +154,23 @@ it("emits the wrappers so the plain output keeps the Unknown types", () => {
   const { p, paths } = check({ "a.seam.ts": "export const f = (s: string) => decode string from JSON.parse(s);\n" });
   expect(p.outputs.get(paths[0]!)!.code).toContain("__decode(__b.string, __unknown(JSON.parse(s)))");
 });
+
+describe("latest", () => {
+  it("reports an AbortSignal parameter written through an alias, once", () => {
+    const source = `type Sig = AbortSignal;
+export latest async function search(q: string, signal: Sig): Promise<Result<string, string>> {
+  return { ok: true, value: q + String(signal.aborted) };
+}
+export latest async function plain(q: string, signal: AbortSignal): Promise<Result<string, string>> {
+  return { ok: true, value: q + String(signal.aborted) };
+}
+export latest async function optional(q: string, signal?: Sig | undefined): Promise<Result<string, string>> {
+  return { ok: true, value: q + String(signal?.aborted) };
+}
+`;
+    expect(codesByLine(source)).toEqual([
+      [2, "SEAM1402"],
+      [8, "SEAM1402"],
+    ]);
+  });
+});

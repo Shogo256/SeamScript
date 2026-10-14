@@ -22,5 +22,6 @@ const CANONICAL = /^(?:0|-?[1-9][0-9]{0,18})$/;
 export function parseInt64(s: string): bigint | undefined {
   if (!CANONICAL.test(s)) return undefined;
   const value = BigInt(s);
-  return Int64.inRange(value) ? value : undefined;
+  // Up to 18 digits always fits; only 19 digits can exceed the range.
+  return s.length - (s.charCodeAt(0) === 0x2d ? 1 : 0) < 19 || Int64.inRange(value) ? value : undefined;
 }

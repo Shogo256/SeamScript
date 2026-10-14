@@ -2,6 +2,16 @@
   "name": "@seamscript/runtime",
   "version": "0.0.0",
   "description": "Runtime library for SeamScript: boundary decoders, latest, Text / Int64 / Decimal / Zoned",
+  "keywords": [
+    "seamscript",
+    "typescript",
+    "decoder",
+    "validation",
+    "bigint",
+    "decimal",
+    "unicode",
+    "grapheme"
+  ],
   "type": "module",
   "sideEffects": false,
   "exports": {
@@ -25,5 +35,8 @@
     "typescript": "5.9.3",
     "vite": "8.3.4",
     "vitest": "5.0.3"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

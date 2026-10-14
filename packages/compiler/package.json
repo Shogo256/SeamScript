@@ -2,6 +2,16 @@
   "name": "@seamscript/compiler",
   "version": "0.0.0",
   "description": "SeamScript compiler: expands .seam.ts into plain TypeScript and checks boundaries",
+  "keywords": [
+    "seamscript",
+    "typescript",
+    "compiler",
+    "vite-plugin",
+    "unplugin",
+    "esbuild-plugin",
+    "rollup-plugin",
+    "webpack-plugin"
+  ],
   "type": "module",
   "bin": {
     "seamc": "./bin/seamc.js"
@@ -14,6 +24,22 @@
     "./vite": {
       "types": "./dist/vite.d.ts",
       "default": "./dist/vite.js"
+    },
+    "./checker": {
+      "types": "./dist/checker.d.ts",
+      "default": "./dist/checker.js"
+    },
+    "./transform": {
+      "types": "./dist/transform.d.ts",
+      "default": "./dist/transform.js"
+    },
+    "./mappings": {
+      "types": "./dist/mappings.d.ts",
+      "default": "./dist/mappings.js"
+    },
+    "./unplugin": {
+      "types": "./dist/unplugin.d.ts",
+      "default": "./dist/unplugin.js"
     }
   },
   "files": [
@@ -31,13 +57,16 @@
     "@jridgewell/trace-mapping": "0.3.31",
     "@seamscript/parser": "0.0.0",
     "magic-string": "1.4.3",
-    "typescript": "5.9.3"
+    "typescript": "5.9.3",
+    "unplugin": "3.4.0"
   },
   "devDependencies": {
     "@seamscript/runtime": "0.0.0",
     "@types/node": "24.19.2",
+    "rollup": "4.64.6",
     "vite": "8.3.4",
-    "vitest": "5.0.3"
+    "vitest": "5.0.3",
+    "webpack": "5.111.1"
   },
   "peerDependencies": {
     "vite": ">=6"
@@ -46,5 +75,8 @@
     "vite": {
       "optional": true
     }
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

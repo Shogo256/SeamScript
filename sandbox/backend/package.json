@@ -1,0 +1,25 @@
+{
+  "name": "@seamscript-sandbox/backend",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Pseudo backend for the sandbox: a simulated market over HTTP and WebSocket, with fault injection",
+  "type": "module",
+  "bin": {
+    "sandbox-backend": "./src/main.ts"
+  },
+  "scripts": {
+    "start": "node src/main.ts",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "tsc -p tsconfig.json && node --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@seamscript/core": "0.0.0",
+    "@seamscript/runtime": "0.0.0",
+    "ws": "8.22.0"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "@types/ws": "8.18.2",
+    "typescript": "5.9.3"
+  }
+}

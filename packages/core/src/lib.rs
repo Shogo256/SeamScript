@@ -8,6 +8,7 @@
 use unicode_normalization::UnicodeNormalization;
 use unicode_segmentation::UnicodeSegmentation;
 
+pub mod props;
 #[cfg(target_arch = "wasm32")]
 mod wasm;
 
@@ -41,13 +42,23 @@ pub fn normalize(s: &str, form: Form) -> String {
 /// string's UTF-16 length, which is what JavaScript strings index by.
 pub fn grapheme_boundaries_utf16(s: &str) -> Vec<u32> {
     let mut out = Vec::with_capacity(s.len() / 2 + 2);
+    grapheme_boundaries_utf16_into(s, usize::MAX, &mut out);
+    out
+}
+
+/// Appends to `out` the UTF-16 offsets of the first `limit + 1` boundaries
+/// (0, then the end of each cluster), or all of them if there are fewer.
+pub fn grapheme_boundaries_utf16_into(s: &str, limit: usize, out: &mut Vec<u32>) {
     let mut offset = 0u32;
     out.push(0);
-    for g in s.graphemes(true) {
+    for g in s.graphemes(true).take(limit) {
         offset += g.chars().map(|c| c.len_utf16() as u32).sum::<u32>();
         out.push(offset);
     }
-    out
+}
+
+pub fn grapheme_count(s: &str) -> usize {
+    s.graphemes(true).count()
 }
 
 #[cfg(test)]

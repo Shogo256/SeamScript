@@ -259,10 +259,11 @@ function array<T>(item: Decoder<T>): Decoder<T[]> {
       if (!Array.isArray(v)) return new Failure(`${item.expected}[]`, describe(v));
       if (depth >= MAX_DEPTH) return tooDeep();
       const out: T[] = [];
+      const run = item[RUN];
       for (let i = 0; i < v.length; i++) {
         const raw = readIndex(v, i);
         if (raw === UNREADABLE) return fail(item.expected, "unreadable", String(i));
-        const r = item[RUN](raw, depth + 1);
+        const r = run(raw, depth + 1);
         if (r instanceof Failure) {
           r.reversedPath.push(String(i));
           return r;
@@ -318,25 +319,31 @@ function lazy<T>(get: () => Decoder<T>): Decoder<T> {
 
 function object<T extends object>(shape: ObjectShape<T>): ObjectDecoder<T> {
   const entries = Object.keys(shape).map((k) => [k, (shape as Record<string, Decoder<unknown>>)[k]!] as const);
+  // Resolved once, so the loop below reads plain arrays instead of decoder objects
+  // of many different shapes (whose property loads the engine cannot cache).
+  const keys = entries.map(([k]) => k);
+  const decoders = entries.map(([, d]) => d);
+  const optional = decoders.map(isOptional);
+  const runs = decoders.map((d) => (isOptional(d) ? d.inner[RUN] : d[RUN]));
+  const n = keys.length;
   return make<T, { shape: ObjectShape<T> }>(
     () => "object",
     (v, depth) => {
       if (typeof v !== "object" || v === null || Array.isArray(v)) return new Failure("object", describe(v));
       if (depth >= MAX_DEPTH) return tooDeep();
       const out: Record<string, unknown> = {};
-      for (const [key, d] of entries) {
+      for (let i = 0; i < n; i++) {
+        const key = keys[i]!;
         const raw = readOwn(v, key);
-        if (raw === UNREADABLE) return fail(d.expected, "unreadable", key);
-        let r: Step<unknown>;
-        if (isOptional(d)) {
+        if (raw === UNREADABLE) return fail(decoders[i]!.expected, "unreadable", key);
+        if (optional[i]) {
           // `name?:` allows the key to be absent, not null. An own `undefined`
           // (possible through postMessage, not JSON) counts as absent.
           if (raw === ABSENT || raw === undefined) continue;
-          r = d.inner[RUN](raw, depth + 1);
-        } else {
-          if (raw === ABSENT) return fail(d.expected, "missing", key);
-          r = d[RUN](raw, depth + 1);
+        } else if (raw === ABSENT) {
+          return fail(decoders[i]!.expected, "missing", key);
         }
+        const r = runs[i]!(raw, depth + 1);
         if (r instanceof Failure) {
           r.reversedPath.push(key);
           return r;

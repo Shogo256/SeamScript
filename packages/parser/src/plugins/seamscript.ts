@@ -43,6 +43,22 @@ export default (superClass: typeof Parser) =>
       return !CONTINUATIONS.some(w => this.isUnparsedContextual(next, w));
     }
 
+    /**
+     * The next token can start a decode target: a name, a string or number literal
+     * (`decode "buy" | "sell" from v`), or a parenthesized type
+     * (`decode (Order | null)[] from v`). An identifier followed on the same line by
+     * a name, a string or a number is a syntax error in TypeScript; a template
+     * literal is not (decode`x` is a tagged template), so it does not count. A
+     * parenthesis is a call in TypeScript: it is taken for a decode only if a type
+     * parses there and `from` follows on the same line, which a call never has
+     * (seamTryParseDecode backtracks otherwise).
+     */
+    seamNextStartsDecodeTarget(): boolean {
+      if (this.seamNextIsNameOnSameLine()) return true;
+      const ch = this.codePointAtPos(this.nextTokenInLineStart());
+      return ch === 0x22 || ch === 0x27 || ch === 0x28 || (ch >= 0x30 && ch <= 0x39);
+    }
+
     seamIsBoundaryStart(): boolean {
       return this.seamAtWord("boundary") && this.seamNextIsNameOnSameLine();
     }
@@ -96,7 +112,7 @@ export default (superClass: typeof Parser) =>
     // decode Type from UnaryExpression
     // Same precedence as `await`: `decode X from a ?? b` is `(decode X from a) ?? b`.
     seamTryParseDecode(): N.Expression | undefined {
-      if (!this.seamAtWord("decode") || !this.seamNextIsNameOnSameLine()) {
+      if (!this.seamAtWord("decode") || !this.seamNextStartsDecodeTarget()) {
         return undefined;
       }
       const node = this.startNode() as Undone<any>;

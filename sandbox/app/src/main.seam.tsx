@@ -1,0 +1,30 @@
+import { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
+import { coreState } from "./core-state.seam";
+import { Feed } from "./feed.seam";
+import { App } from "./ui/App.seam";
+import "./styles.css";
+
+declare global {
+  interface Window {
+    /** For tests: the feed's state, to compare with the server's. */
+    __feed?: Feed;
+  }
+}
+
+// In a production build every module imports @seamscript/core first, so by the
+// time this runs the WASM core is installed (or has failed).
+performance.mark("seam:main");
+const core = coreState();
+// ?render=each re-renders after every message, for the latency benchmark. A query
+// parameter is outside data: it is decoded like a server response.
+const render = decode "frame" | "each" | null from new URLSearchParams(location.search).get("render");
+const feed = new Feed({ render: render.ok && render.value !== null ? render.value : "frame" });
+window.__feed = feed;
+if (core.kind !== "failed") feed.start();
+
+createRoot(document.getElementById("root")!).render(
+  <StrictMode>
+    <App feed={feed} core={core} />
+  </StrictMode>,
+);

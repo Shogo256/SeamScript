@@ -2,3 +2,4 @@ target/
 .ucd/
 dist/
 js/wasm.ts
+js/tables.ts

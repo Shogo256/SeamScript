@@ -3,6 +3,12 @@
   "version": "0.0.0",
   "private": true,
   "description": "Fork of @babel/parser 8.0.7 that adds SeamScript syntax: boundary, decode … from, latest",
+  "keywords": [
+    "seamscript",
+    "babel",
+    "parser",
+    "typescript"
+  ],
   "type": "module",
   "exports": {
     ".": {
@@ -32,5 +38,8 @@
     "esbuild": "0.28.2",
     "vite": "8.3.4",
     "vitest": "5.0.3"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

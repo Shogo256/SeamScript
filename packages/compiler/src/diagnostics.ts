@@ -24,6 +24,7 @@ export const Codes = {
   decodeTarget: "SEAM1201",
   textForm: "SEAM1301",
   latestShape: "SEAM1401",
+  latestSignal: "SEAM1402",
   unknownFlow: "SEAM2001",
   unknownLaunder: "SEAM2002",
   sourceReference: "SEAM2003",

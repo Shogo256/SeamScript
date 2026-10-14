@@ -1,27 +1,27 @@
-# 比較デモ
+# Comparison demo
 
-仕様書の「最初のマイルストーン」のデモです。同じ画面（注文の読み込み、メモのプレビュー、検索）を、TypeScript strict ＋ Zod ＋ ESLint と SeamScript の両方で書いています。仕様書が挙げた3つのバグが、ユーザーに届く前に止まるかを比べます。
+This is the demo for the "first milestone" in the initial specification (which is not included in this repository). The same screen (loading an order, previewing a memo, search) is written both in TypeScript strict + Zod + ESLint and in SeamScript. The demo compares whether the three bugs that the specification lists are stopped before they reach the user.
 
 ```bash
 nix-shell --run 'yarn build && yarn demo'
 ```
 
 ```
-バグ                             TS + Zod + ESLint       SeamScript
-1. unknown 経由で as Order       ✗ tsc・ESLint とも通過  ✓ SEAM2001 で停止
-2. 絵文字を slice(0, 10) で切る  ✗ 文字が割れる          ✓ 割れない
-3. 古い応答で画面が戻る          ✗ 古い結果が残る        ✓ 最新の結果が残る
+Bug                               TS + Zod + ESLint        SeamScript
+1. as Order via unknown           ✗ passes tsc and ESLint  ✓ stopped by SEAM2001
+2. slice(0, 10) on an emoji memo  ✗ splits a character     ✓ no split
+3. a stale response wins          ✗ stale result shown     ✓ latest result shown
 ```
 
-## 何を確かめているか
+## What it checks
 
-`ts-zod-eslint/test/bugs.test.ts` と `seamscript/test/bugs.test.ts` は、同じタイトルのテストを3本ずつ持っています。各テストは「そのバグがユーザーに届く前に止まるか」を確かめます。TS 側は3本とも失敗し、SeamScript 側は3本とも通ります。CI（`.github/workflows/comparison-demo.yml`）でも、TS 側のジョブは赤、SeamScript 側のジョブは緑になります。
+`ts-zod-eslint/test/bugs.test.ts` and `seamscript/test/bugs.test.ts` each have three tests with the same titles. Each test checks whether the bug is stopped before it reaches the user. All three fail on the TS side, and all three pass on the SeamScript side. In CI (`.github/workflows/comparison-demo.yml`) as well, the TS job is red and the SeamScript job is green.
 
-TS 側では、`tsc --strict` と ESLint はどちらもエラーを出しません（`yarn workspace @seamscript-demo/ts-zod-eslint lint`）。型検査と lint をすべて通ったうえで、バグが残るということです。
+On the TS side, neither `tsc --strict` nor ESLint reports an error (`yarn workspace @seamscript-demo/ts-zod-eslint lint`). In other words, the bugs remain even though the code passes every type check and lint rule.
 
-### 1. unknown 経由の `as Order`（コンパイル時）
+### 1. `as Order` via unknown (compile time)
 
-`src/load-order.ts` と `src/load-order.seam.ts` は、拡張子以外まったく同じコードです。
+`src/load-order.ts` and `src/load-order.seam.ts` contain exactly the same code, apart from the file extension.
 
 ```ts
 const v = await res.json();
@@ -29,32 +29,32 @@ const u: unknown = v;
 screen.order = u as Order;
 ```
 
-TS 側は、Zod のスキーマがあるのに、この経路だけが検証を飛ばします。`tsc --strict` も、typescript-eslint の recommended もこれを通します。SeamScript では `res.json()` が Unknown 型になるので、`const u: unknown = v` の行が SEAM2001 になります。
+On the TS side, there is a Zod schema, yet this one path skips validation. Both `tsc --strict` and typescript-eslint's recommended config let it through. In SeamScript, `res.json()` has the type Unknown, so the line `const u: unknown = v` is reported as SEAM2001.
 
-typescript-eslint の `no-unsafe-type-assertion` を有効にすれば、TS 側でも止まることは確認済みです。ただしこのルールは recommended にも strict にも入っておらず（入っているのは `all` だけ）、型情報つきの lint も必要です。SeamScript との違いは、設定に依らず常に止まることです。
+Enabling typescript-eslint's `no-unsafe-type-assertion` does stop it on the TS side too; this has been verified. But the rule is in neither recommended nor strict (only in `all`), and it also needs type-aware linting. The difference is that SeamScript always stops it, whatever the configuration.
 
-SeamScript での正しい書き方は `decode` です。
+The correct way to write this in SeamScript is with `decode`.
 
 ```ts
 const r = decode Order from await res.json();
 if (r.ok) screen.order = r.value;
 ```
 
-### 2. 絵文字を `slice(0, 10)` で切る（実行時）
+### 2. Cutting an emoji with `slice(0, 10)` (runtime)
 
-`"お誕生日おめでとう🎂ケーキ"` の先頭 10 文字をプレビューにすると、TS 側は UTF-16 の単位で切るので、🎂 が半分に割れます（`"お誕生日おめでとう\ud83c…"`）。SeamScript 側は `Text.slice(memo, 0, 10)` で、グラフェム（見た目の1文字）単位で切ります。Text に対して TS と同じ `memo.slice(0, 10)` と書くと、それ自体がコンパイルエラー（TS2349）になります。`memo.length` も SEAM2101 で止まります。
+When the first 10 characters of `"お誕生日おめでとう🎂ケーキ"` are used as a preview, the TS side cuts in UTF-16 units, so 🎂 is split in half (`"お誕生日おめでとう\ud83c…"`). The SeamScript side uses `Text.slice(memo, 0, 10)`, which cuts by grapheme (one visible character). Writing the TS version, `memo.slice(0, 10)`, on a Text is itself a compile error (TS2349). `memo.length` is also stopped, by SEAM2101.
 
-### 3. 古い応答で画面が戻る（実行時）
+### 3. A stale response rolls the screen back (runtime)
 
-`"ab"` から `"abc"` へ打ち替えたとき、`"ab"` の応答が後から届くケースです。テストでは応答の返る順を固定したモック fetch を使うので、毎回同じ結果になります。TS 側は後から届いた `"ab"` の結果で画面が上書きされます。SeamScript 側は `latest async function` なので、古い呼び出しが Stale になり、`"abc"` の結果が残ります。
+This is the case where the user changes `"ab"` to `"abc"` and the response for `"ab"` arrives later. The tests use a mock fetch with a fixed response order, so the result is the same every time. On the TS side, the late `"ab"` result overwrites the screen. On the SeamScript side, the function is a `latest async function`, so the old call becomes Stale and the `"abc"` result stays.
 
-`latest` が保証するのは、呼び出し側が `await` の直後に結果を反映する場合です。反映する前にもう一度 `await` を挟むと、順序は保証されません（TLC で確認。`packages/runtime/spec/`）。
+`latest` guarantees this when the caller applies the result right after `await`. If another `await` comes before the result is applied, ordering is not guaranteed (confirmed with TLC; see `packages/runtime/spec/`).
 
-## 構成
+## Layout
 
-| パス | 内容 |
+| Path | Contents |
 |---|---|
-| `ts-zod-eslint/` | TS 版。`tsconfig.json`（strict）と `eslint.config.js`（typescript-eslint recommended） |
-| `seamscript/` | SeamScript 版。テストは Vite プラグイン経由で `.seam.ts` を読む |
-| `shared/harness.ts` | 両側のテストが共有する道具：応答順を固定する fetch、文字の切れ目の判定 |
-| `run.mjs` | 両側を実行して表を出す。TS 側は3つとも素通り、SeamScript 側は3つとも停止、という想定どおりのときだけ終了コード 0 |
+| `ts-zod-eslint/` | The TS version. `tsconfig.json` (strict) and `eslint.config.js` (typescript-eslint recommended) |
+| `seamscript/` | The SeamScript version. The tests load `.seam.ts` through the Vite plugin |
+| `shared/harness.ts` | Tools shared by the tests on both sides: a fetch with a fixed response order, and detection of character breaks |
+| `run.mjs` | Runs both sides and prints the table. Exits with code 0 only when the result is as expected: the TS side lets all three bugs through and the SeamScript side stops all three |

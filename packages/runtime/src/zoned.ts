@@ -33,7 +33,7 @@ function daysInMonth(y: number, m: number): number {
   return m === 2 ? (isLeapYear(y) ? 29 : 28) : [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][m - 1]!;
 }
 
-function parse(s: string): Fields | undefined {
+function parse(s: string): (Fields & { canonical: boolean }) | undefined {
   const m = SYNTAX.exec(s);
   if (m === null) return undefined;
   const year = Number(m[1]);
@@ -55,7 +55,15 @@ function parse(s: string): Fields | undefined {
     offsetMinutes = (m[9] === "-" ? -1 : 1) * (oh * 60 + om);
   }
   const fraction = (m[7] ?? "").replace(/0+$/, "");
-  return { year, month, day, hour, minute, second, fraction, offsetMinutes };
+  // Whether `s` is already what format() would write, so it can be returned as is:
+  // an upper-case T, seconds present, a "." fraction without trailing zeros, and
+  // a zero offset written "Z" (not "z" or "+00:00").
+  const canonical =
+    s.charCodeAt(10) === 0x54 &&
+    m[6] !== undefined &&
+    (m[7] === undefined || (s.charCodeAt(19) === 0x2e && fraction === m[7])) &&
+    (m[8] === undefined ? offsetMinutes !== 0 : m[8] === "Z");
+  return { year, month, day, hour, minute, second, fraction, offsetMinutes, canonical };
 }
 
 function pad(n: number, width: number): string {
@@ -74,9 +82,54 @@ function format(f: Fields): Zoned {
   return `${date}T${time}${frac}${offset}` as Zoned;
 }
 
+function digit(s: string, i: number): number {
+  const d = s.charCodeAt(i) - 0x30;
+  return d >= 0 && d <= 9 ? d : NaN;
+}
+
+function two(s: string, i: number): number {
+  return digit(s, i) * 10 + digit(s, i + 1);
+}
+
+/**
+ * Whether `s` is a valid Zoned already in canonical form, checked without the
+ * regular expression: what servers send, and what decode sees most. NaN from a
+ * non-digit fails every range check below.
+ */
+function isCanonical(s: string): boolean {
+  const n = s.length;
+  if (n < 20 || s.charCodeAt(4) !== 0x2d || s.charCodeAt(7) !== 0x2d || s.charCodeAt(10) !== 0x54) return false;
+  if (s.charCodeAt(13) !== 0x3a || s.charCodeAt(16) !== 0x3a) return false;
+  const year = two(s, 0) * 100 + two(s, 2);
+  const month = two(s, 5);
+  const day = two(s, 8);
+  if (!(year >= 0 && month >= 1 && month <= 12 && day >= 1 && day <= daysInMonth(year, month))) return false;
+  if (!(two(s, 11) <= 23 && two(s, 14) <= 59 && two(s, 17) <= 59)) return false;
+  let i = 19;
+  if (s.charCodeAt(i) === 0x2e) {
+    const start = ++i;
+    while (i < n && i - start < 9 && digit(s, i) >= 0) i++;
+    // 1 to 9 digits, the last not a zero.
+    if (i === start || s.charCodeAt(i - 1) === 0x30) return false;
+  }
+  if (s.charCodeAt(i) === 0x5a) return i + 1 === n;
+  const sign = s.charCodeAt(i);
+  if ((sign !== 0x2b && sign !== 0x2d) || i + 6 !== n || s.charCodeAt(i + 3) !== 0x3a) return false;
+  const oh = two(s, i + 1);
+  const om = two(s, i + 4);
+  // A zero offset is written "Z".
+  return oh <= 23 && om <= 59 && oh + om > 0;
+}
+
 export function normalizeZoned(s: string): Zoned | undefined {
+  return isCanonical(s) ? (s as Zoned) : normalizeZonedByPattern(s);
+}
+
+/** The same without the shortcut (exported for tests, which compare the two). */
+export function normalizeZonedByPattern(s: string): Zoned | undefined {
   const f = parse(s);
-  return f === undefined ? undefined : format(f);
+  if (f === undefined) return undefined;
+  return f.canonical ? (s as Zoned) : format(f);
 }
 
 // Days since 1970-01-01 in the proleptic Gregorian calendar (H. Hinnant, "chrono-Compatible Low-Level Date Algorithms").

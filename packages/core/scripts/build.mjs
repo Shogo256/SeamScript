@@ -1,5 +1,6 @@
-// Builds the Rust crate for wasm32, embeds the module in js/wasm.ts, and
-// compiles the JavaScript side. Embedding (rather than shipping a .wasm file
+// Writes js/tables.ts (properties that let the JavaScript side skip WebAssembly,
+// derived from the crate), builds the crate for wasm32, embeds the module in
+// js/wasm.ts, and compiles the JavaScript side. Embedding (rather than shipping a .wasm file
 // next to the JS) means no bundler needs to be told how to find the file.
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -10,6 +11,7 @@ import { fileURLToPath } from "node:url";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const run = (cmd, args) => execFileSync(cmd, args, { cwd: root, stdio: "inherit" });
 
+run("cargo", ["run", "--quiet", "--release", "--example", "tables", "--", "js/tables.ts"]);
 run("cargo", ["build", "--release", "--target", "wasm32-unknown-unknown"]);
 const wasm = readFileSync(join(root, "target/wasm32-unknown-unknown/release/seamscript_core.wasm"));
 writeFileSync(

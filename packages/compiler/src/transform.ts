@@ -6,6 +6,7 @@
 import { isReferenced } from "@babel/types";
 import type * as t from "@babel/types";
 import MagicString, { type SourceMap } from "magic-string";
+import { type CodeRange, segmentOffsets } from "./mappings.js";
 import {
   type AnyNode,
   end,
@@ -16,7 +17,7 @@ import {
   start,
   walk,
 } from "./ast.js";
-import { type BoundaryInfo, type DecoderScope, decoderFor, objectDecoder, textForm, unionBoundaryDecoder } from "./decoders.js";
+import { BUILTIN_TYPES, type Builtin, type BoundaryInfo, type DecoderScope, decoderFor, objectDecoder, textForm, unionBoundaryDecoder } from "./decoders.js";
 import { Codes, type Diagnostic, lineColumn } from "./diagnostics.js";
 
 export const RUNTIME_MODULE = "@seamscript/runtime";
@@ -50,6 +51,14 @@ export interface TransformOptions {
 export interface TransformResult {
   code: string;
   map: SourceMap;
+  /**
+   * Names the transform rewrote around but that still stand for the same thing:
+   * a boundary's name and the decoder constant declared for it, each boundary
+   * name in a decode target and its place in the decoder expression, a latest
+   * function's name and the wrapper's. With the kept text (`identityRanges`),
+   * this is what an editor maps between the source and the output.
+   */
+  links: CodeRange[];
   diagnostics: Diagnostic[];
   /** True when the file could not be parsed; `code` is then the unchanged source. */
   syntaxError: boolean;
@@ -71,18 +80,29 @@ export function transform(source: string, fileName: string, options: TransformOp
     const error = e as SyntaxError & { pos?: number };
     report(error.pos ?? 0, Codes.syntax, error.message.replace(/ \(\d+:\d+\)$/, ""));
     const s = new MagicString(source);
-    return { code: source, map: s.generateMap({ source: fileName, hires: true, includeContent: true }), diagnostics, syntaxError: true };
+    return { code: source, map: s.generateMap({ source: fileName, hires: true, includeContent: true }), links: [], diagnostics, syntaxError: true };
   }
 
   const program = ast.program;
   const s = new MagicString(source);
+  const runtime: RuntimeImports = { names: new Map(), namespaces: new Set() };
   const scope: DecoderScope = {
     source,
     boundaries: new Map<string, BoundaryInfo>(),
     otherTypes: new Set<string>(),
+    builtin: (name) => {
+      if (name.type === "TSQualifiedName") {
+        const right = name.right.name as Builtin;
+        return name.left.type === "Identifier" && runtime.namespaces.has(name.left.name) && BUILTIN_TYPES.includes(right) ? right : undefined;
+      }
+      if (name.type !== "Identifier") return undefined;
+      const imported = runtime.names.get(name.name);
+      if (imported !== undefined) return BUILTIN_TYPES.includes(imported as Builtin) ? (imported as Builtin) : undefined;
+      return !bound.has(name.name) && BUILTIN_TYPES.includes(name.name as Builtin) ? (name.name as Builtin) : undefined;
+    },
     report: (node, code, message) => report(start(node), code, message),
   };
-  const bound = moduleBindings(program, scope);
+  const bound = moduleBindings(program, scope, runtime);
 
   const boundaries: { node: SeamBoundaryDeclaration; index: number; exported: boolean }[] = [];
   const decodes: SeamDecodeExpression[] = [];
@@ -114,7 +134,7 @@ export function transform(source: string, fileName: string, options: TransformOp
         latests.push(node);
         break;
       case "TSTypeReference":
-        if (node.typeName.type === "Identifier" && node.typeName.name === "Text" && node.typeArguments) {
+        if (scope.builtin(node.typeName) === "Text" && node.typeArguments) {
           const arg = node.typeArguments.params[0];
           if (textForm(node) === undefined) {
             scope.report(node, Codes.textForm, "Text takes its normalization form: Text<NFC> or Text<NFD>.");
@@ -182,9 +202,13 @@ export function transform(source: string, fileName: string, options: TransformOp
   for (const w of wraps.sort((a, b) => a.end - b.end || b.start - a.start)) s.appendLeft(w.end, ")");
 
   // decode X from v  →  __decode(X, v)
+  const decoderTexts = new Map<SeamDecodeExpression, string>();
   for (const node of decodes) {
     const decoder = decoderFor(node.typeAnnotation, scope, { kind: "decode" });
-    const from = /(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\n]*\n)*from\b/y;
+    decoderTexts.set(node, decoder ?? "undefined as any");
+    // Parentheses around the whole target are not part of its node (Babel keeps no
+    // node for them); the parser has checked that `from` follows them.
+    const from = /(?:\s|\)|\/\*[\s\S]*?\*\/|\/\/[^\n]*\n)*from\b/y;
     from.lastIndex = end(node.typeAnnotation);
     if (!from.test(source)) throw new Error(`Internal error: no "from" after the decode target at ${fileName}:${start(node)}`);
     s.overwrite(start(node), from.lastIndex, `__decode(${decoder ?? "undefined as any"},`);
@@ -210,19 +234,39 @@ export function transform(source: string, fileName: string, options: TransformOp
     const hasSignal =
       lastTypeNode?.type === "TSTypeReference" && lastTypeNode.typeName.type === "Identifier" && lastTypeNode.typeName.name === "AbortSignal";
     const options = hasSignal ? `, { signal: ${fn.params.length - 1} }` : "";
+    // A generic function keeps its type parameters: the wrapper declares the same
+    // ones and refers to the implementation instantiated with them (`typeof f__impl<T>`),
+    // or Parameters<> and ReturnType<> would instantiate them as unknown. Copied text
+    // comes from `s`, so it carries the edits already made inside it (Text<NFC>).
+    const tp = fn.typeParameters?.type === "TSTypeParameterDeclaration" ? fn.typeParameters : undefined;
+    const typeParams = tp ? s.slice(start(tp), end(tp)) : "";
+    const implRef = tp ? `${impl}<${tp.params.map((p) => (typeof p.name === "string" ? p.name : (p.name as t.Identifier).name)).join(", ")}>` : impl;
+    // `Promise<X>` written on the declaration reads better in an editor than the
+    // helper alias it equals.
+    const returned = fn.returnType?.type === "TSTypeAnnotation" ? fn.returnType.typeAnnotation : undefined;
+    const promised =
+      returned?.type === "TSTypeReference" && returned.typeName.type === "Identifier" && returned.typeName.name === "Promise" && returned.typeArguments?.params.length === 1
+        ? returned.typeArguments.params[0]!
+        : undefined;
+    const returnType = promised ? `Promise<${s.slice(start(promised), end(promised))} | __Stale>` : `__LatestReturn<typeof ${implRef}>`;
     s.overwrite(
       start(node),
       end(fn.id!),
-      `function ${name}(...args: __LatestArgs<typeof ${impl}, ${hasSignal}>): __LatestReturn<typeof ${impl}> {\n` +
+      `function ${name}${typeParams}(...args: __LatestArgs<typeof ${implRef}, ${hasSignal}>): ${returnType} {\n` +
         // apply() rather than a spread: the checker forbids spreading Unknown data, and
         // a latest function may legitimately take Unknown arguments.
-        `  return __latestFor(${impl}${options}).apply(undefined, args);\n` +
+        `  return __latestFor(${implRef}${options}).apply(undefined, args);\n` +
         `}\n` +
-        `${name}.fork = () => __latestFor(${impl}${options}).fork();\n` +
+        // A fork of a generic function fixes its type arguments: f.fork<T>().
+        (tp
+          ? `${name}.fork = function ${typeParams}() { return __latestFor(${implRef}${options}).fork(); };\n`
+          : `${name}.fork = () => __latestFor(${impl}${options}).fork();\n`) +
         `async function ${impl}`,
     );
     helpers.add("__latestFor");
-    helperTypes.add("LatestArgs").add("LatestReturn");
+    helperTypes.add("LatestArgs");
+    if (promised) helperTypes.add("Stale");
+    else helperTypes.add("LatestReturn");
   }
 
   const specifiers = [
@@ -243,16 +287,61 @@ export function transform(source: string, fileName: string, options: TransformOp
     else s.prepend(`${lines}\n`);
   }
 
-  return {
-    code: s.toString(),
-    map: s.generateMap({ source: fileName, hires: true, includeContent: true }),
-    diagnostics,
-    syntaxError: false,
-  };
+  const code = s.toString();
+  const map = s.generateMap({ source: fileName, hires: true, includeContent: true });
+  return { code, map, links: links(source, code, map, boundaries, decoderTexts, latests), diagnostics, syntaxError: false };
+}
+
+function links(
+  source: string,
+  code: string,
+  map: SourceMap,
+  boundaries: readonly { node: SeamBoundaryDeclaration }[],
+  decoders: ReadonlyMap<SeamDecodeExpression, string>,
+  latests: readonly SeamLatestDeclaration[],
+): CodeRange[] {
+  const out: CodeRange[] = [];
+  // Where each rewritten construct starts in the output: an overwritten span has
+  // one segment, at its start.
+  const generatedAt = new Map<number, number>();
+  for (const [g, src] of segmentOffsets(source, code, map)) if (!generatedAt.has(src)) generatedAt.set(src, g);
+
+  for (const { node } of boundaries) {
+    const name = node.id.name;
+    const at = code.indexOf(`const ${name}: __`);
+    if (at >= 0) out.push({ source: start(node.id), generated: at + "const ".length, length: name.length });
+  }
+  for (const [node, decoder] of decoders) {
+    const at = generatedAt.get(start(node));
+    if (at === undefined || !code.startsWith(`__decode(${decoder},`, at)) continue;
+    // The decoder names the target's boundaries in the order the type does.
+    let from = 0;
+    walk(node.typeAnnotation, (n) => {
+      if (n.type !== "Identifier") return;
+      const m = new RegExp(`(?<![\\w$])${n.name.replace(/\$/g, "\\$")}(?![\\w$])`, "g");
+      m.lastIndex = from;
+      const hit = m.exec(decoder);
+      if (hit === null) return;
+      from = hit.index + n.name.length;
+      out.push({ source: start(n), generated: at + "__decode(".length + hit.index, length: n.name.length });
+    });
+  }
+  for (const node of latests) {
+    const id = node.declaration.id!;
+    const at = generatedAt.get(start(node));
+    if (at !== undefined && code.startsWith(`function ${id.name}(`, at)) out.push({ source: start(id), generated: at + "function ".length, length: id.name.length });
+  }
+  return out;
+}
+
+/** What a file imports from the runtime: local name → exported name, and namespace imports. */
+interface RuntimeImports {
+  names: Map<string, string>;
+  namespaces: Set<string>;
 }
 
 /** Names bound at module scope, so ambient runtime names are only imported when free. Also fills the scope's type tables. */
-function moduleBindings(program: t.Program, scope: DecoderScope): Set<string> {
+function moduleBindings(program: t.Program, scope: DecoderScope, runtime: RuntimeImports): Set<string> {
   const names = new Set<string>();
   const addPattern = (p: t.Node | null | undefined) => {
     if (!p) return;
@@ -274,7 +363,12 @@ function moduleBindings(program: t.Program, scope: DecoderScope): Set<string> {
     if (!decl) return;
     switch (decl.type) {
       case "ImportDeclaration":
-        for (const spec of decl.specifiers) names.add(spec.local.name);
+        for (const spec of decl.specifiers) {
+          names.add(spec.local.name);
+          if (decl.source.value !== RUNTIME_MODULE) continue;
+          if (spec.type === "ImportNamespaceSpecifier") runtime.namespaces.add(spec.local.name);
+          else if (spec.type === "ImportSpecifier") runtime.names.set(spec.local.name, spec.imported.type === "Identifier" ? spec.imported.name : spec.imported.value);
+        }
         break;
       case "VariableDeclaration":
         for (const d of decl.declarations) addPattern(d.id);

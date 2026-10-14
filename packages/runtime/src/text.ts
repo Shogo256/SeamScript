@@ -4,6 +4,8 @@ declare const form: unique symbol;
 
 export type TextForm = "NFC" | "NFD";
 
+export type TextStatus = "core" | "host" | "failed";
+
 /**
  * String APIs that count UTF-16 code units. Calling any of them fails to type-check.
  * Reading `length` or an index only yields `never`, which TypeScript does not
@@ -35,9 +37,16 @@ export type Text<F extends TextForm> = string & Brand<"Text"> & { readonly [form
 
 /** What `@seamscript/core` provides once its WASM module is instantiated. */
 export interface TextCore {
+  /** Replaces lone surrogates with U+FFFD as well. */
   normalize(s: string, form: TextForm): string;
-  /** UTF-16 offsets of every grapheme boundary, starting at 0 and ending at `s.length`. */
-  graphemeBoundaries(s: string): ArrayLike<number>;
+  /** The number of grapheme clusters in `s`. */
+  graphemeCount(s: string): number;
+  /**
+   * UTF-16 offsets of grapheme boundaries: 0, then the end of each cluster. With
+   * `limit`, only the first `limit + 1` (all of them if `s` has fewer clusters),
+   * which lets the core stop early on a long string.
+   */
+  graphemeBoundaries(s: string, limit?: number): ArrayLike<number>;
   readonly unicodeVersion: string;
 }
 
@@ -52,7 +61,7 @@ export class CoreUnavailableError extends Error {
   }
 }
 
-type Backend = Pick<TextCore, "normalize" | "graphemeBoundaries">;
+type Backend = Omit<TextCore, "unicodeVersion">;
 
 let core: TextCore | undefined;
 let coreFailure: { cause: unknown } | undefined;
@@ -61,7 +70,6 @@ let coreFailure: { cause: unknown } | undefined;
 export function __installCore(c: TextCore): void {
   core = c;
   coreFailure = undefined;
-  cache.clear();
 }
 
 /**
@@ -71,25 +79,50 @@ export function __installCore(c: TextCore): void {
 export function __coreFailed(cause: unknown): void {
   core = undefined;
   coreFailure = { cause };
-  cache.clear();
+}
+
+// Printable ASCII never joins into larger clusters in any Unicode version, so
+// every code unit is a cluster, with or without Unicode data.
+const PRINTABLE_ASCII = /^[\x20-\x7e]*$/;
+
+function asciiBoundaries(s: string, limit: number): number[] {
+  const n = Math.min(limit, s.length);
+  const out = new Array<number>(n + 1);
+  for (let i = 0; i <= n; i++) out[i] = i;
+  return out;
 }
 
 let segmenter: Intl.Segmenter | null | undefined;
 
-// Development fallback: whatever Unicode version the host's ICU implements.
+function hostSegmenter(): Intl.Segmenter | null {
+  if (segmenter === undefined) {
+    segmenter = typeof Intl.Segmenter === "function" ? new Intl.Segmenter(undefined, { granularity: "grapheme" }) : null;
+  }
+  return segmenter;
+}
+
+// Development fallback: whatever Unicode version the host's ICU implements
+// (code points where there is no Intl.Segmenter).
 const fallback: Backend = {
-  normalize: (s, f) => s.normalize(f),
-  graphemeBoundaries(s) {
-    if (segmenter === undefined) {
-      segmenter = typeof Intl.Segmenter === "function" ? new Intl.Segmenter(undefined, { granularity: "grapheme" }) : null;
-    }
+  // String.prototype.normalize keeps lone surrogates; the core replaces them.
+  normalize: (s, f) => toWellFormed(s).normalize(f),
+  graphemeCount(s) {
+    if (PRINTABLE_ASCII.test(s)) return s.length;
+    let n = 0;
+    for (const _ of hostSegmenter()?.segment(s) ?? s) n++;
+    return n;
+  },
+  graphemeBoundaries(s, limit = Infinity) {
+    if (PRINTABLE_ASCII.test(s)) return asciiBoundaries(s, limit);
     const out: number[] = [];
-    if (segmenter !== null) {
-      for (const { index } of segmenter.segment(s)) out.push(index);
+    const seg = hostSegmenter();
+    // Each cluster's start; the start of cluster `limit` is the end of the last one wanted.
+    if (seg !== null) {
+      for (const { index } of seg.segment(s)) if (out.push(index) > limit) return out;
     } else {
       let i = 0;
       for (const cp of s) {
-        out.push(i);
+        if (out.push(i) > limit) return out;
         i += cp.length;
       }
     }
@@ -98,10 +131,23 @@ const fallback: Backend = {
   },
 };
 
+// After a failed load only what needs no Unicode data still works.
+const unavailable: Backend = {
+  normalize() {
+    throw new CoreUnavailableError(coreFailure?.cause);
+  },
+  graphemeCount(s) {
+    if (PRINTABLE_ASCII.test(s)) return s.length;
+    throw new CoreUnavailableError(coreFailure?.cause);
+  },
+  graphemeBoundaries(s, limit = Infinity) {
+    if (PRINTABLE_ASCII.test(s)) return asciiBoundaries(s, limit);
+    throw new CoreUnavailableError(coreFailure?.cause);
+  },
+};
+
 function backend(): Backend {
-  if (core !== undefined) return core;
-  if (coreFailure !== undefined) throw new CoreUnavailableError(coreFailure.cause);
-  return fallback;
+  return core ?? (coreFailure !== undefined ? unavailable : fallback);
 }
 
 const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
@@ -112,7 +158,7 @@ export function isWellFormed(s: string): boolean {
 }
 
 function toWellFormed(s: string): string {
-  return typeof s.toWellFormed === "function" ? s.toWellFormed() : s.replace(LONE_SURROGATES, "�");
+  return typeof s.toWellFormed === "function" ? s.toWellFormed() : s.replace(LONE_SURROGATES, "\uFFFD");
 }
 
 /** Used by the decoder: `undefined` when `s` is not well-formed UTF-16. */
@@ -120,47 +166,17 @@ export function decodeText<F extends TextForm>(s: string, f: F): Text<F> | undef
   return isWellFormed(s) ? (backend().normalize(s, f) as Text<F>) : undefined;
 }
 
-// Printable ASCII never joins into larger clusters in any Unicode version, so
-// boundaries are simply every code unit. Covers most identifiers and UI strings.
-const PRINTABLE_ASCII = /^[\x20-\x7e]*$/;
-
-const CACHE_SIZE = 256;
-const cache = new Map<string, ArrayLike<number>>();
-
-/** `null` means every code unit is its own grapheme. */
-function offsets(s: string): ArrayLike<number> | null {
-  if (PRINTABLE_ASCII.test(s)) return null;
-  const hit = cache.get(s);
-  if (hit !== undefined) {
-    cache.delete(s);
-    cache.set(s, hit);
-    return hit;
-  }
-  const b = backend().graphemeBoundaries(s);
-  cache.set(s, b);
-  if (cache.size > CACHE_SIZE) cache.delete(cache.keys().next().value!);
-  return b;
-}
-
-function count(s: string, b: ArrayLike<number> | null): number {
-  return b === null ? s.length : b.length - 1;
-}
-
-function offsetAt(b: ArrayLike<number> | null, i: number): number {
-  return b === null ? i : b[i]!;
-}
-
 // Array.prototype.slice's handling of relative indices.
 function relative(index: number, n: number): number {
-  const i = Math.trunc(index) || 0;
-  return i < 0 ? Math.max(n + i, 0) : Math.min(i, n);
+  return index < 0 ? Math.max(n + index, 0) : Math.min(index, n);
 }
 
 function make<F extends TextForm>(f: F, parts: readonly string[]): Text<F> {
-  // Joining normalized strings can produce an unnormalized one ("e" + "́"), so
+  // Joining normalized strings can produce an unnormalized one ("e" + "\u0301"), so
   // normalization runs on the whole. Unlike decode, construction never fails:
-  // lone surrogates become U+FFFD, as they would in any UTF-8 based backend.
-  return backend().normalize(toWellFormed(parts.join("")), f) as Text<F>;
+  // every backend's normalize replaces lone surrogates with U+FFFD, as any UTF-8
+  // based implementation would.
+  return backend().normalize(parts.length === 1 ? parts[0]! : parts.join(""), f) as Text<F>;
 }
 
 export const Text = {
@@ -176,39 +192,51 @@ export const Text = {
 
   /** Number of grapheme clusters. */
   length(t: Text<TextForm>): number {
-    const s: string = t;
-    return count(s, offsets(s));
+    return backend().graphemeCount(t);
   },
 
   /** The grapheme cluster at `index`; negative indices count from the end. */
   at<F extends TextForm>(t: Text<F>, index: number): Text<F> | undefined {
     const s: string = t;
-    const b = offsets(s);
-    const n = count(s, b);
     let i = Math.trunc(index) || 0;
-    if (i < 0) i += n;
-    if (i < 0 || i >= n) return undefined;
-    return s.slice(offsetAt(b, i), offsetAt(b, i + 1)) as Text<F>;
+    // From the start, only the clusters up to `i` are needed.
+    const b = i >= 0 ? backend().graphemeBoundaries(s, i + 1) : backend().graphemeBoundaries(s);
+    if (i < 0) i += b.length - 1;
+    if (i < 0 || i + 1 >= b.length) return undefined;
+    return s.slice(b[i], b[i + 1]) as Text<F>;
   },
 
   /** Like `Array.prototype.slice`, over grapheme clusters. */
   slice<F extends TextForm>(t: Text<F>, start: number = 0, end?: number): Text<F> {
     const s: string = t;
-    const b = offsets(s);
-    const n = count(s, b);
-    const from = relative(start, n);
-    const to = end === undefined ? n : relative(end, n);
+    const a = Math.trunc(start) || 0;
+    const e = end === undefined ? undefined : Math.trunc(end) || 0;
     // Cut at grapheme boundaries, a piece of a normalized string is itself
     // normalized: no combining sequence is split (checked in properties.test.ts).
-    return (to <= from ? "" : s.slice(offsetAt(b, from), offsetAt(b, to))) as Text<F>;
+    if (a >= 0 && e === undefined) {
+      // Everything from cluster `a` on: only the first `a` clusters are needed.
+      const b = backend().graphemeBoundaries(s, a);
+      return (a < b.length ? s.slice(b[a]) : "") as Text<F>;
+    }
+    if (a >= 0 && e !== undefined && e >= 0) {
+      if (e <= a) return "" as Text<F>;
+      const b = backend().graphemeBoundaries(s, e);
+      const n = b.length - 1; // min(e, number of clusters)
+      return (a >= n ? "" : s.slice(b[a], b[Math.min(e, n)])) as Text<F>;
+    }
+    // A negative index counts from the end, which needs every boundary.
+    const b = backend().graphemeBoundaries(s);
+    const n = b.length - 1;
+    const from = relative(a, n);
+    const to = e === undefined ? n : relative(e, n);
+    return (to <= from ? "" : s.slice(b[from], b[to])) as Text<F>;
   },
 
   graphemes<F extends TextForm>(t: Text<F>): Text<F>[] {
     const s: string = t;
-    const b = offsets(s);
-    const n = count(s, b);
+    const b = backend().graphemeBoundaries(s);
     const out: Text<F>[] = [];
-    for (let i = 0; i < n; i++) out.push(s.slice(offsetAt(b, i), offsetAt(b, i + 1)) as Text<F>);
+    for (let i = 0; i + 1 < b.length; i++) out.push(s.slice(b[i], b[i + 1]) as Text<F>);
     return out;
   },
 
@@ -220,5 +248,16 @@ export const Text = {
   /** `true` only when normalization and segmentation come from `@seamscript/core`. */
   get deterministic(): boolean {
     return core !== undefined;
+  },
+
+  /**
+   * Where Text's Unicode data comes from: `"core"` (the WASM core, as in a
+   * production build), `"host"` (the environment's ICU, as in development), or
+   * `"failed"` (the core could not load; Text operations throw
+   * CoreUnavailableError). An app checks this at start-up to stop with a message
+   * instead of failing on its first Text operation.
+   */
+  get status(): TextStatus {
+    return core !== undefined ? "core" : coreFailure !== undefined ? "failed" : "host";
   },
 };

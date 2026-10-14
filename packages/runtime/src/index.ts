@@ -1,9 +1,9 @@
 export { type Ok, type Err, type Result, type DecodeError, type Stale, ok, err } from "./result.js";
 export { Unknown, __unknown, __unknownAsync } from "./unknown.js";
 export { Int64 } from "./int64.js";
-export { Decimal } from "./decimal.js";
+export { Decimal, type Rounding } from "./decimal.js";
 export { Zoned } from "./zoned.js";
-export { Text, type TextForm, type TextCore, CoreUnavailableError, __installCore, __coreFailed } from "./text.js";
+export { Text, type TextForm, type TextStatus, type TextCore, CoreUnavailableError, __installCore, __coreFailed } from "./text.js";
 export {
   __b,
   __decode,

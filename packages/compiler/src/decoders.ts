@@ -11,12 +11,22 @@ export interface BoundaryInfo {
   node: SeamBoundaryDeclaration;
 }
 
+/** The runtime's types that the compiler gives a meaning (decoders, Text's form argument). */
+export type Builtin = "Text" | "Int64" | "Decimal" | "Zoned" | "Unknown";
+export const BUILTIN_TYPES: readonly Builtin[] = ["Text", "Int64", "Decimal", "Zoned", "Unknown"];
+
 export interface DecoderScope {
   source: string;
   /** Boundaries declared in this file. */
   boundaries: Map<string, BoundaryInfo>;
   /** Types declared in this file that are not boundaries (type aliases, interfaces, ...). */
   otherTypes: Set<string>;
+  /**
+   * The runtime type a type name denotes, if any: a free `Text` (imported
+   * automatically), a name imported from the runtime (`Text as T`), or a member of
+   * a namespace import of it (`rt.Text`). A file's own `Text` is not the runtime's.
+   */
+  builtin(name: t.TSEntityName): Builtin | undefined;
   report(node: AnyNode, code: string, message: string): void;
 }
 
@@ -143,7 +153,8 @@ export function textForm(node: t.TSTypeReference): "NFC" | "NFD" | undefined {
 
 function referenceDecoder(node: t.TSTypeReference, scope: DecoderScope, site: Site): string | undefined {
   const name = node.typeName.type === "Identifier" ? node.typeName.name : undefined;
-  if (name === "Text") {
+  const builtin = scope.builtin(node.typeName);
+  if (builtin === "Text") {
     const form = textForm(node);
     if (form !== undefined) return `__b.text("${form}")`;
     scope.report(node, Codes.textForm, "Text needs its normalization form: Text<NFC> or Text<NFD>.");
@@ -154,8 +165,8 @@ function referenceDecoder(node: t.TSTypeReference, scope: DecoderScope, site: Si
     scope.report(node, Codes.boundaryFieldType, `Generic types cannot cross a boundary.${hint}`);
     return undefined;
   }
-  if (name !== undefined && name in BUILTINS) return BUILTINS[name];
-  if (name === "Unknown") {
+  if (builtin !== undefined && builtin in BUILTINS) return BUILTINS[builtin];
+  if (builtin === "Unknown") {
     scope.report(node, Codes.boundaryFieldType, "A boundary field cannot be Unknown: the boundary is where data gets checked.");
     return undefined;
   }
@@ -233,7 +244,7 @@ export function unionBoundaryDecoder(
   let ok = true;
   for (const m of unionMembers(decl.union)) {
     const name = m.type === "TSTypeReference" && m.typeName.type === "Identifier" ? m.typeName.name : undefined;
-    const simple = m.type === "TSTypeReference" && !m.typeArguments && !(name !== undefined && (name in BUILTINS || name === "Text"));
+    const simple = m.type === "TSTypeReference" && !m.typeArguments && scope.builtin(m.typeName) === undefined;
     if (!simple) {
       scope.report(m, Codes.boundaryUnionMember, "A union boundary may only list other boundaries: `boundary Event = Paid | Refunded`.");
       ok = false;

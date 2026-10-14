@@ -70,6 +70,16 @@ describe("Decimal", () => {
     expect(Decimal.from("3.140")).toBe("3.14");
     expect(() => Decimal.from("3,14")).toThrow(SyntaxError);
   });
+
+  it("adds, subtracts and multiplies exactly", () => {
+    const d = Decimal.from;
+    expect(Decimal.add(d("0.1"), d("0.2"))).toBe("0.3");
+    expect(Decimal.sub(d("2345.5"), d("2345.5"))).toBe("0");
+    expect(Decimal.sub(d("1"), d("1.25"))).toBe("-0.25");
+    expect(Decimal.mul(d("2345.5"), d("9007199254740993"))).toBe("21126385851994999081.5");
+    expect(Decimal.mul(d("-0.5"), d("0"))).toBe("0");
+    expect(Decimal.mul(d("1.10"), d("1.10"))).toBe("1.21");
+  });
 });
 
 describe("Zoned", () => {

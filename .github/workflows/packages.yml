@@ -1,0 +1,28 @@
+# Every package's tests: the runtime (with its property tests), the WASM core
+# against Unicode's conformance data,
+# the parser against upstream Babel's fixtures, the compiler (including the
+# bundler plugins and seamc --watch), the tsserver plugin driven through tsserver,
+# the VS Code extension as packaged, and the comparison demo.
+name: Packages
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    name: yarn test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm install -g yarn@1.22.22
+      - run: rustup target add wasm32-unknown-unknown
+      - run: yarn install --frozen-lockfile
+      - run: yarn test
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vscode-extension
+          path: packages/vscode/dist/*.vsix

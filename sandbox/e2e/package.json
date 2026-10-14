@@ -1,0 +1,15 @@
+{
+  "name": "@seamscript-sandbox/e2e",
+  "version": "0.0.0",
+  "private": true,
+  "description": "End-to-end tests of the sandbox app in Chromium, Firefox and WebKit, against the pseudo backend with faults",
+  "type": "module",
+  "scripts": {
+    "test": "yarn --cwd ../app build && yarn --cwd ../app-ts build && playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.61.1",
+    "@types/node": "24.19.2",
+    "typescript": "5.9.3"
+  }
+}

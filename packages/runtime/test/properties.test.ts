@@ -1,11 +1,14 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
+import { normalizeDecimal, normalizeDecimalByPattern } from "../src/decimal.js";
+import { normalizeZoned, normalizeZonedByPattern } from "../src/zoned.js";
 import {
   __b,
   __decode,
   __latest,
   Decimal,
   type Decoder,
+  type Rounding,
   err,
   Int64,
   type ObjectDecoder,
@@ -15,6 +18,14 @@ import {
   type TextForm,
   Zoned,
 } from "../src/index.js";
+
+/** coef / 10^scale for a canonical Decimal, computed independently of the runtime. */
+function scaledOf(d: string): { coef: bigint; scale: number } {
+  const neg = d.startsWith("-");
+  const [int, frac = ""] = (neg ? d.slice(1) : d).split(".");
+  const coef = BigInt(int! + frac);
+  return { coef: neg ? -coef : coef, scale: frac.length };
+}
 
 // --- decoders under test -------------------------------------------------------
 
@@ -200,6 +211,24 @@ describe("Decimal", () => {
     );
   });
 
+  it("add, sub and mul are exact and return the canonical form", () => {
+    fc.assert(
+      fc.property(decimalString, decimalString, (a, b) => {
+        const da = Decimal.from(a);
+        const db = Decimal.from(b);
+        const x = scaled(a, 25);
+        const y = scaled(b, 25);
+        const sum = Decimal.add(da, db);
+        const diff = Decimal.sub(da, db);
+        const product = Decimal.mul(da, db);
+        expect(scaled(sum, 25)).toBe(x + y);
+        expect(scaled(diff, 25)).toBe(x - y);
+        expect(scaled(product, 50)).toBe(x * y);
+        for (const r of [sum, diff, product]) expect(Decimal.from(r)).toBe(r);
+      }),
+    );
+  });
+
   it("toFixed matches Intl.NumberFormat with halfExpand rounding", () => {
     fc.assert(
       fc.property(decimalString, fc.integer({ min: 0, max: 25 }), (s, digits) => {
@@ -214,6 +243,66 @@ describe("Decimal", () => {
       }),
     );
   });
+
+  const roundings: Rounding[] = ["ceil", "floor", "expand", "trunc", "halfCeil", "halfFloor", "halfExpand", "halfTrunc", "halfEven"];
+  const intl = (value: string, digits: number, roundingMode: Rounding) =>
+    new Intl.NumberFormat("en-US", { useGrouping: false, minimumFractionDigits: digits, maximumFractionDigits: digits, roundingMode, signDisplay: "negative" }).format(
+      value as Intl.StringNumericLiteral,
+    );
+
+  it("toFixed and round match Intl.NumberFormat in every rounding mode", () => {
+    fc.assert(
+      fc.property(decimalString, fc.integer({ min: 0, max: 12 }), fc.constantFrom(...roundings), (s, digits, mode) => {
+        const d = Decimal.from(s);
+        expect(Decimal.toFixed(d, digits, mode)).toBe(intl(s, digits, mode));
+        expect(Decimal.toFixed(Decimal.round(d, digits, mode), digits)).toBe(intl(s, digits, mode));
+        expect(Decimal.from(Decimal.round(d, digits, mode))).toBe(Decimal.round(d, digits, mode));
+      }),
+      { numRuns: 3000 },
+    );
+  });
+
+  it("div rounds the exact quotient once, in every rounding mode", () => {
+    // The quotient's decimal expansion, 40 digits past what is kept, with a final
+    // 1 when it does not end there: Intl.NumberFormat then rounds it exactly as it
+    // would the true value (the 1 keeps "just above a half" above it).
+    const expansion = (a: Decimal, b: Decimal, digits: number) => {
+      const p = scaledOf(a);
+      const q = scaledOf(b);
+      const extra = digits + 40;
+      const n = p.coef * 10n ** BigInt(q.scale + extra);
+      const d = q.coef * 10n ** BigInt(p.scale);
+      const neg = n < 0n !== d < 0n && n !== 0n;
+      const m = (n < 0n ? -n : n) / (d < 0n ? -d : d);
+      const exact = (n < 0n ? -n : n) % (d < 0n ? -d : d) === 0n;
+      const s = m.toString().padStart(extra + 1, "0");
+      return `${neg ? "-" : ""}${s.slice(0, -extra)}.${s.slice(-extra)}${exact ? "" : "1"}`;
+    };
+    fc.assert(
+      fc.property(decimalString, decimalString, fc.integer({ min: 0, max: 10 }), fc.constantFrom(...roundings), (x, y, digits, mode) => {
+        const a = Decimal.from(x);
+        const b = Decimal.from(y);
+        if (b === "0") {
+          expect(() => Decimal.div(a, b, digits, mode)).toThrow(RangeError);
+          return;
+        }
+        const q = Decimal.div(a, b, digits, mode);
+        expect(Decimal.from(q)).toBe(q);
+        expect(Decimal.toFixed(q, digits)).toBe(intl(expansion(a, b, digits), digits, mode));
+      }),
+      { numRuns: 5000 },
+    );
+  });
+
+  it("div rejects bad digits and roundings instead of guessing", () => {
+    const one = Decimal.from("1");
+    expect(Decimal.div(Decimal.from("2"), Decimal.from("3"), 4)).toBe("0.6667");
+    expect(Decimal.div(Decimal.from("-1"), Decimal.from("8"), 2, "halfEven")).toBe("-0.12");
+    expect(Decimal.div(Decimal.from("10"), Decimal.from("4"), 0, "trunc")).toBe("2");
+    expect(() => Decimal.div(one, one, -1)).toThrow(RangeError);
+    expect(() => Decimal.div(one, one, 1.5)).toThrow(RangeError);
+    expect(() => Decimal.div(one, one, 2, "nearest" as Rounding)).toThrow(RangeError);
+  });
 });
 
 // --- Zoned against Date -------------------------------------------------------------
@@ -226,6 +315,29 @@ describe("Zoned", () => {
         expect(Zoned.from(z)).toBe(z);
         expect(Zoned.sameInstant(z, Zoned.from(s))).toBe(true);
       }),
+    );
+  });
+
+  it("returns the canonical spelling, whichever spelling it was given", () => {
+    const spelled = fc.record({
+      p: zonedParts,
+      t: fc.constantFrom("T", "t"),
+      seconds: fc.boolean(),
+      comma: fc.boolean(),
+      zero: fc.constantFrom("Z", "z", "+00:00"),
+    });
+    fc.assert(
+      fc.property(spelled, ({ p, t, seconds, comma, zero }) => {
+        const [hh, mm, ss] = p.time.split(":");
+        const zeroOffset = p.off === "Z" || p.off === "z";
+        // Written without seconds only when they are zero and there is no fraction.
+        const omitSeconds = !seconds && ss === "00" && p.fraction === "";
+        const input = `${p.date}${t}${hh}:${mm}${omitSeconds ? "" : `:${ss}`}${p.fraction ? `${comma ? "," : "."}${p.fraction}` : ""}${zeroOffset ? zero : p.off}`;
+        const fraction = p.fraction.replace(/0+$/, "");
+        const canonical = `${p.date}T${hh}:${mm}:${ss}${fraction ? `.${fraction}` : ""}${zeroOffset ? "Z" : p.off}`;
+        expect(Zoned.from(input)).toBe(canonical);
+      }),
+      { numRuns: 2000 },
     );
   });
 
@@ -298,6 +410,64 @@ describe("Text", () => {
         expect(Text.slice(t, 0, k) + Text.slice(t, k)).toBe(t);
         expect(Text.at(t, k)).toBe(gs.at(k));
       }),
+    );
+  });
+
+  it("slice and at index clusters exactly as Array.prototype.slice and at index an array", () => {
+    // Clusters straight from Intl.Segmenter, independent of Text's own paths.
+    const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+    const index = fc.oneof(fc.integer({ min: -20, max: 20 }), fc.double({ min: -20, max: 20 }), fc.constantFrom(NaN, Infinity, -Infinity, -0, 1e9));
+    fc.assert(
+      fc.property(anyText, index, fc.option(index, { nil: undefined }), (s, a, e) => {
+        const t = Text.nfc(s);
+        const gs = Array.from(segmenter.segment(t), (x) => x.segment);
+        expect(Text.length(t)).toBe(gs.length);
+        expect(Text.slice(t, a, e)).toBe(gs.slice(a, e).join(""));
+        expect(Text.at(t, a)).toBe(gs.at(a));
+      }),
+      { numRuns: 2000 },
+    );
+  });
+});
+
+// --- shortcuts against the patterns they skip ------------------------------------------
+
+/** Strings near the valid ones: a valid string with characters replaced, inserted or removed. */
+function near(valid: fc.Arbitrary<string>, alphabet: string): fc.Arbitrary<string> {
+  const edit = fc.record({ at: fc.nat(40), kind: fc.constantFrom("replace", "insert", "delete"), c: fc.constantFrom(...alphabet) });
+  return fc.tuple(valid, fc.array(edit, { maxLength: 3 })).map(([s, edits]) =>
+    edits.reduce((x, { at, kind, c }) => {
+      const i = at % (x.length + 1);
+      return kind === "insert" ? x.slice(0, i) + c + x.slice(i) : kind === "delete" ? x.slice(0, i) + x.slice(i + 1) : x.slice(0, i) + c + x.slice(i + 1);
+    }, s),
+  );
+}
+
+describe("canonical-form shortcuts", () => {
+  it("Zoned: the shortcut answers exactly as the pattern does", () => {
+    const valid = fc
+      // A day inside 0000-9999 on either side, so any offset keeps the year in range.
+      .date({ min: new Date("0000-01-02T00:00:00Z"), max: new Date("9999-12-30T00:00:00Z"), noInvalidDate: true })
+      .chain((d) => fc.integer({ min: -1439, max: 1439 }).map((off) => Zoned.fromDate(d, off)));
+    fc.assert(
+      fc.property(near(valid, "0123456789-:+.,TtZz "), (s) => {
+        expect(normalizeZoned(s)).toBe(normalizeZonedByPattern(s));
+      }),
+      { numRuns: 20_000 },
+    );
+  });
+
+  it("Decimal: the shortcut answers exactly as the pattern does", () => {
+    const valid = fc.tuple(fc.boolean(), fc.bigInt({ min: 0n, max: 10n ** 30n }), fc.nat(12)).map(([neg, c, scale]) => {
+      const digits = c.toString().padStart(scale + 1, "0");
+      const body = scale === 0 ? digits : `${digits.slice(0, -scale)}.${digits.slice(-scale)}`;
+      return (neg ? "-" : "") + body;
+    });
+    fc.assert(
+      fc.property(near(valid, "0123456789-.+eE "), (s) => {
+        expect(normalizeDecimal(s)).toBe(normalizeDecimalByPattern(s));
+      }),
+      { numRuns: 20_000 },
     );
   });
 });

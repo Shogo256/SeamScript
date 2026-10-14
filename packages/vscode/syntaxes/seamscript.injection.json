@@ -1,0 +1,73 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "scopeName": "seamscript.injection",
+  "comment": "SeamScript's syntax on top of TypeScript's grammar (.seam.ts and .seam.tsx are TypeScript files to VS Code). Recognized in the same shapes as the compiler's parser: the keyword followed on the same line by a name or literal, never `as`, `satisfies` or `of`.",
+  "injectionSelector": "L:source.ts -comment -string, L:source.tsx -comment -string",
+  "patterns": [
+    {
+      "include": "#boundary"
+    },
+    {
+      "include": "#decode"
+    },
+    {
+      "include": "#latest"
+    }
+  ],
+  "repository": {
+    "boundary": {
+      "comment": "boundary Name { field: Type; ... }  or  boundary Name = A | B",
+      "begin": "(?<![\\w$.])(boundary)\\s+([A-Za-z_$][\\w$]*)(?=\\s*[{=])",
+      "beginCaptures": {
+        "1": {
+          "name": "storage.type.boundary.seamscript"
+        },
+        "2": {
+          "name": "entity.name.type.boundary.seamscript"
+        }
+      },
+      "end": "(?<=\\})|(?=;)|$",
+      "patterns": [
+        {
+          "match": "=",
+          "name": "keyword.operator.assignment.ts"
+        },
+        {
+          "include": "source.ts#type"
+        }
+      ]
+    },
+    "decode": {
+      "comment": "decode Type from value: the target is a type, and `from` ends it. A parenthesized target counts only when `from` follows on the line, as in the parser (otherwise it is a call).",
+      "begin": "(?<![\\w$.])(decode)(?=\\s+(?:(?!(?:as|satisfies|of|from)(?![\\w$]))[\\w$\"'\\[{-]|\\((?=.*(?<![\\w$.])from(?![\\w$]))))",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.operator.expression.decode.seamscript"
+        }
+      },
+      "end": "(?<![\\w$.])(from)(?![\\w$])|$",
+      "endCaptures": {
+        "1": {
+          "name": "keyword.operator.expression.from.seamscript"
+        }
+      },
+      "patterns": [
+        {
+          "include": "source.ts#type"
+        }
+      ]
+    },
+    "latest": {
+      "comment": "[export] latest async function name(...): `export` is taken here too, or TypeScript's grammar would read `latest` as the name being exported",
+      "match": "(?<![\\w$.])(?:(export)\\s+)?(latest)(?=\\s+async\\s+function(?![\\w$]))",
+      "captures": {
+        "1": {
+          "name": "keyword.control.export.ts"
+        },
+        "2": {
+          "name": "storage.modifier.latest.seamscript"
+        }
+      }
+    }
+  }
+}

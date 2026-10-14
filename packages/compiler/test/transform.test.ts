@@ -116,6 +116,7 @@ describe("decode", () => {
     expect(code("const r = decode Order from await res.json();")).toContain("const r = __decode(Order, await res.json());");
     expect(code("const r = decode Text<NFC>[] from v;")).toContain('const r = __decode(__b.array(__b.text("NFC")), v);');
     expect(code("const r = decode Int64 | null from v;")).toContain("const r = __decode(__b.nullable(__b.int64), v);");
+    expect(code(`const r = decode "buy" | "sell" | null from v;`)).toContain('const r = __decode(__b.nullable(__b.literal("buy", "sell")), v);');
   });
 
   it("keeps the operand's own text, parentheses and precedence", () => {
@@ -154,6 +155,18 @@ describe("latest", () => {
 
   it("rejects generators", () => {
     expect(codes("latest async function* f() {}")).toEqual(["SEAM1401"]);
+  });
+
+  it("keeps a generic function's type parameters and spells a written return type", () => {
+    const out = code("export latest async function get<T extends object, const K = string>(key: K, signal: AbortSignal): Promise<Result<T, Text<NFC>>> {}");
+    expect(out).toContain(
+      "export function get<T extends object, const K = string>(...args: __LatestArgs<typeof get__impl<T, K>, true>): Promise<Result<T, Text<\"NFC\">> | __Stale> {\n" +
+        "  return __latestFor(get__impl<T, K>, { signal: 1 }).apply(undefined, args);\n" +
+        "}\n" +
+        "get.fork = function <T extends object, const K = string>() { return __latestFor(get__impl<T, K>, { signal: 1 }).fork(); };\n" +
+        "async function get__impl<T extends object, const K = string>(key: K, signal: AbortSignal): Promise<Result<T, Text<\"NFC\">>> {}",
+    );
+    expect(out).toContain("type Stale as __Stale");
   });
 });
 
@@ -197,4 +210,36 @@ it("reports syntax errors with their position", () => {
 
 it("parses .seam.tsx with JSX", () => {
   expect(code("const el = <p>{decode A from v}</p>;", "a.seam.tsx")).toContain("const el = <p>{__decode(A, v)}</p>;");
+});
+
+describe("the runtime's types are recognized by what they refer to", () => {
+  it("leaves a file's own Text alone", () => {
+    const out = code('import type { Text } from "./my-text";\nexport const greeting: Text<NFC> = make();');
+    expect(out).toContain("Text<NFC>");
+    expect(out).not.toContain("@seamscript/runtime");
+  });
+
+  it("follows an aliased import and a namespace import of the runtime", () => {
+    const aliased = code('import { Text as T, Int64 as I } from "@seamscript/runtime";\nboundary Note { body: T<NFC>; id: I }\nexport const n = (x: T<NFD>) => x;');
+    expect(aliased).toContain('body: T<"NFC">');
+    expect(aliased).toContain('body: __b.text("NFC")');
+    expect(aliased).toContain("id: __b.int64");
+    expect(aliased).toContain('(x: T<"NFD">)');
+    const namespaced = code('import * as rt from "@seamscript/runtime";\nboundary Note { body: rt.Text<NFC>; at: rt.Zoned }');
+    expect(namespaced).toContain('body: rt.Text<"NFC">');
+    expect(namespaced).toContain('body: __b.text("NFC")');
+    expect(namespaced).toContain("at: __b.zoned");
+  });
+
+  it("does not take a file's own Int64 for the runtime's", () => {
+    expect(codes("type Int64 = number;\nboundary Row { id: Int64 }")).toEqual(["SEAM1106"]);
+  });
+});
+
+describe("parenthesized decode targets", () => {
+  it("decodes an array of a nullable boundary and other parenthesized types", () => {
+    expect(code("boundary Order { id: Int64 }\nconst a = decode (Order | null)[] from v;")).toContain("const a = __decode(__b.array(__b.nullable(Order)), v);");
+    expect(code("const b = decode (string | null) from v;")).toContain("const b = __decode(__b.nullable(__b.string), v);");
+    expect(code("const c = decode ((Text<NFC>))[] from v;")).toContain('const c = __decode(__b.array(__b.text("NFC")), v);');
+  });
 });

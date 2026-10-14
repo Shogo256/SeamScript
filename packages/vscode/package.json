@@ -1,0 +1,51 @@
+{
+  "name": "seamscript",
+  "displayName": "SeamScript",
+  "description": "SeamScript (.seam.ts, .seam.tsx) in VS Code: TypeScript's completion, hover, navigation and rename through boundary, decode and latest, and SeamScript's diagnostics",
+  "version": "0.0.0",
+  "publisher": "seamscript",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters"
+  ],
+  "keywords": [
+    "seamscript",
+    "typescript"
+  ],
+  "contributes": {
+    "typescriptServerPlugins": [
+      {
+        "name": "@seamscript/ts-plugin",
+        "enableForWorkspaceTypeScriptVersions": true
+      }
+    ],
+    "grammars": [
+      {
+        "injectTo": [
+          "source.ts",
+          "source.tsx"
+        ],
+        "scopeName": "seamscript.injection",
+        "path": "./syntaxes/seamscript.injection.json"
+      }
+    ]
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@seamscript/ts-plugin": "0.0.0",
+    "@vscode/vsce": "4.0.0",
+    "tm-grammars": "1.32.22",
+    "vitest": "5.0.3",
+    "vscode-oniguruma": "2.0.1",
+    "vscode-textmate": "9.3.2"
+  }
+}

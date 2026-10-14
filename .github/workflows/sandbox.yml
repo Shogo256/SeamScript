@@ -1,0 +1,63 @@
+# The sandbox: a realtime dashboard written in SeamScript against a pseudo
+# backend that injects faults. The E2E job runs it in Chromium, Firefox and
+# WebKit; the bench job measures it (Chromium, WebKit and Node: Playwright's
+# Firefox build is too slow at WebAssembly to stand for real Firefox) against its
+# TypeScript + Zod twin and fails when a ratio leaves its budget
+# (sandbox/bench/budgets.json).
+name: Sandbox
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  e2e:
+    name: E2E (Chromium, Firefox, WebKit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm install -g yarn@1.22.22
+      - run: rustup target add wasm32-unknown-unknown
+      - run: yarn install --frozen-lockfile
+      - run: yarn build
+      - name: Unit tests of the pseudo backend's fault stages
+        run: yarn workspace @seamscript-sandbox/backend test
+      - name: seamc check of the app
+        run: yarn workspace @seamscript-sandbox/app run check
+      - run: sh packages/core/scripts/fetch-ucd.sh
+      - run: npx playwright install --with-deps chromium firefox webkit
+        working-directory: sandbox/e2e
+      - run: yarn workspace @seamscript-sandbox/e2e test
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: e2e-results
+          path: sandbox/e2e/results
+
+  bench:
+    name: Benchmarks within budget
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm install -g yarn@1.22.22
+      - run: rustup target add wasm32-unknown-unknown
+      - run: sudo apt-get install -y hyperfine
+      - run: yarn install --frozen-lockfile
+      - run: yarn build
+      - run: npx playwright install --with-deps chromium webkit
+        working-directory: sandbox/e2e
+      - run: node scripts/run.ts --quick
+        working-directory: sandbox/bench
+      - run: node scripts/check-budgets.ts
+        working-directory: sandbox/bench
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bench-results
+          path: sandbox/bench/results

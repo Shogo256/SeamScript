@@ -1,0 +1,10 @@
+{
+  "decodeVsZodSameChecks": 1.3,
+  "textLengthVsIntl": 1.0,
+  "textNfcVsNormalize": 6,
+  "checkVsTsc": 1.6,
+  "noCoreBundleVsTs": 0.9,
+  "coreAddsGzipBytes": 115000,
+  "latencyP95VsTs": 1.5,
+  "startupCoreVsNoCore": 1.5
+}

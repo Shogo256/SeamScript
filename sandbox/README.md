@@ -1,0 +1,159 @@
+# Sandbox: testing SeamScript against a mock backend
+
+This directory holds one real-time frontend written only in SeamScript, connected to a mock backend with fault injection. It exists to check four things:
+
+1. Whether you can really build a frontend in this language
+2. Whether the IO parts (data that comes from outside) hold up against broken data and changes in shape
+3. Whether, with real-time sync, the screen converges on the server's state under latency, jitter, reordering, loss and disconnects
+4. Responsiveness, compared with a TypeScript + Zod version of the same app, Zod, Intl and tsc
+
+A summary of the results is under [Results](#results). The decisions made and the lessons learned are in [DECISIONS.md](../DECISIONS.md), in the section on the mock-backend trial (`sandbox/`). The full benchmark tables are in [RESULTS.md](RESULTS.md).
+
+## Running it
+
+The tools are in the repository's `shell.nix`, and the browsers in `sandbox/e2e/shell.nix`. The latter is the former plus the Playwright browsers from nixpkgs (Chromium, Firefox, WebKit) and the Mesa that WebKit uses.
+
+```bash
+nix-shell sandbox/e2e/shell.nix --run 'yarn install --frozen-lockfile && yarn sandbox'
+```
+
+`yarn sandbox` builds the packages, runs the mock backend's unit tests, runs `seamc check` on the app, builds both apps, and runs the E2E tests (93 across 3 browsers), in that order.
+
+```bash
+nix-shell sandbox/e2e/shell.nix --run 'yarn sandbox:bench'
+```
+
+This runs every benchmark, writes `results.json` and `report.md` to `sandbox/bench/results/`, and fails if any budget is exceeded. `node sandbox/bench/scripts/run.ts --quick` is a short version for CI. `--only latency` or `--browsers chromium` runs just part of it.
+
+By default the benchmarks run in Chromium and WebKit (plus Node). Playwright's Firefox build runs WASM slowly and doesn't reflect the speed of the Firefox people actually use (on the same machine it is about 5× slower than Mozilla's official build of Firefox 157; see DECISIONS.md). `--browsers firefox` measures it for reference, but those numbers are not checked against the budgets. The E2E tests run in all 3 browsers.
+
+To try the app by hand, start these two:
+
+```bash
+nix-shell --run 'node sandbox/backend/src/main.ts --port 8790'
+```
+
+```bash
+nix-shell --run 'yarn workspace @seamscript-sandbox/app dev'
+```
+
+The dev server doesn't load the WASM core; the app runs on the browser's ICU (shown in the top-right corner of the screen). To see the production build, start the backend with `--static /=sandbox/app/dist` and open its port.
+
+## Layout
+
+| Path | Contents |
+|---|---|
+| `backend/` | The mock backend. Plain TS that runs as-is with Node's type stripping. Market simulation, HTTP and WebSocket, fault injection, an admin API, and serving the built app |
+| `app/` | The SeamScript app (React 19 + Vite 8). Every source file is `.seam.ts` / `.seam.tsx` |
+| `app-ts/` | The same app in TypeScript strict + Zod 4. Used only as the baseline for performance comparisons |
+| `e2e/` | Playwright E2E tests. Each worker starts its own backend and switches faults through the admin API |
+| `bench/` | Benchmarks: decode and Text microbenchmarks (Node and 3 browsers), start-up time, latency, `seamc check` time, bundle size, budgets |
+
+## The app
+
+A dashboard for stock prices and orders, built for a high-frequency feed.
+
+- **Price board**: 40 instruments, updated by trades over the WebSocket. When the board isn't real-time (disconnected, syncing, silent), values are dimmed and labelled "as of seq N"
+- **Instrument search**: uses `latest`. Every keystroke sends a request, and only the newest answer is shown. Older requests are aborted, network request and all
+- **Order entry**: quantity (Int64), price (Decimal), memo (`Text<NFC>`, up to 32 characters and 256 bytes). Sent with `NewOrder.encode`. On network errors and 5xx, the app resends with the same `clientOrderId`
+- **Order list and details**: order IDs exceed 2^53. Details (the list of fills) are fetched with `latest`
+- **Rejected data**: lists rejected frames and responses with the reason (path and expected type)
+
+Where the added syntax is used:
+
+| Syntax | Where |
+|---|---|
+| `boundary` | `api.seam.ts`: 15 of them. WS messages are `boundary ServerMessage = Hello \| Heartbeat \| Tick \| OrderEvent` |
+| `decode` | WS frames (`decode string from e.data` → `JSON.parse` → `decode ServerMessage`), the snapshot, search, details, order responses, the form's quantity and price, the URL query |
+| `latest` | Refetching the snapshot, search, order details |
+| `Unknown` | The type that carries fetch responses and WS frames until they are decoded |
+| Boundary types | IDs, quantities and seq (Int64), prices (Decimal), times (Zoned; displayed in Japan time), instrument names and memos (`Text<NFC>`; truncated for display on grapheme boundaries) |
+
+### Sync design
+
+The language guarantees two things: everything from outside goes through decode, and `latest` discards stale answers to overlapping requests. Stream ordering and convergence are the app's job (`feed.seam.ts`):
+
+- Every event carries a server sequence number (seq) and is applied strictly in seq order. Events that arrive early are held; duplicates and stale ones are dropped
+- When any of the following happens, the app refetches the snapshot and applies the held events that are newer than it:
+  - a gap in seq stays unfilled for 400ms
+  - a heartbeat shows that the server is ahead
+  - events were missed across a reconnect
+  - the server restarted (the epoch changed)
+- If nothing arrives for 3.5 seconds, the connection is treated as dead even without a close, and the app reconnects with backoff
+- Only the stream writes to the store. POST responses are used only to show "accepted"
+- State updates on every message; notifications to the UI are batched to once per frame
+
+## Mock backend
+
+| | |
+|---|---|
+| `GET /api/snapshot` | All instruments and all orders, with the current seq and epoch |
+| `GET /api/instruments?q=` | Instrument search (the query is compared without normalization; sent as NFD, it doesn't match) |
+| `GET /api/orders/:id` | An order and its fills |
+| `POST /api/orders` | Place an order. Idempotent on `clientOrderId`. The memo's characters are counted with the same WASM core as in the app |
+| `POST /api/orders/:id/cancel` | Cancel |
+| `WS /ws` | `hello`, `tick`, `order`, `heartbeat` |
+| `/admin/*` | Fault settings (`faults`), market speed (`driver`), reset (new epoch), the authoritative state (`state`), statistics, forced disconnects, sending raw frames |
+
+Faults are set by POSTing JSON to `/admin/faults`. Unknown keys and values of the wrong type are rejected, so a typo can't turn a test into one that tests nothing. The full list of settings is in `backend/src/faults.ts`. The randomness is seeded.
+
+## E2E
+
+Every scenario checks that:
+
+- the page never throws an uncaught exception (0 `pageerror` events)
+- after the faults stop, the app's state and the screen match the server's state (every instrument's value and version; every order's status, filled quantity, version and memo)
+- a value on screen never goes back to an older version (a MutationObserver watches every DOM change)
+- the app noticed the faults (counts of duplicates, gaps, rejections and so on) and shows the reasons
+
+| File | Scenarios |
+|---|---|
+| `sync.spec.ts` | No faults, latency and jitter, reordering, duplicates, loss, broken JSON, binary frames, schema changes, alternative encodings of the same value, disconnects (with/without close), everything at once, server restart, a silent connection, a flood of events while the snapshot can't be fetched, the display while disconnected |
+| `latest.spec.ts` | Search answers arriving in reverse order, NFD input, switching quickly between order details |
+| `orders.spec.ts` | Int64, Decimal and Text round trips, a 500 after creation and the resend, rejection by the server, a memo with 300 combining characters, one grapheme of 100,000 characters |
+| `core.spec.ts` | The WASM core runs in the production build, passes all of the official Unicode 17.0.0 test data, and halts when CSP forbids WASM; the build without the core |
+| `scale.spec.ts` | 20,000 orders, 1 MB of extra fields, nesting 100,000 levels deep |
+
+## Results
+
+Intel Core i7-8550U (8 cores), Node 24.18, Chromium 149 / Firefox 151 / WebKit 26.5 (all headless, Playwright 1.61.1). E2E in 3 browsers; benchmarks in Chromium, WebKit and Node. The first trial ran on 2026-10-12; the benchmarks after the speed work and editor support ran on 2026-10-14 (other applications were using the CPU and the load average was 12 to 28; absolute values are inflated, so read them as ratios to the baseline). The full tables are in [RESULTS.md](RESULTS.md).
+
+### 1. Can you write a frontend in it? Yes
+
+- The app is 1,515 lines of `.seam.ts` / `.seam.tsx` only (React 19 + Vite 8). `seamc check` passed from the start. Introducing a violation stops it with SEAM2001 / SEAM2101.
+- The production build runs on the WASM core (Unicode 17.0.0) in all 3 browsers. Inside the browser it passes all of the official Unicode 17.0.0 test data (766 grapheme cases, 20,034 normalization lines). On the same data, the browsers' own ICU passes everything in Chromium 149 and Firefox 151, but **WebKit 26.5 is at the level of Unicode 16** (graphemes 756/766, normalization 19,872/20,034).
+- The same features take 1,260 lines in TS + Zod. The SeamScript version is longer because of validation the TS version doesn't do (Int64, Decimal, Zoned, Text normalization), the start-up check with `Text.status`, and the like.
+- What was missing went into the runtime, not the syntax (`Decimal.add/sub/mul`, `Text.status`, and later `Decimal.div/round`). One parser bug was fixed (a decode target that starts with a literal).
+- **It works in the editor too**: a stock TS server reads `.seam.ts` as plain TS, so in this app 14 of 15 files show errors (151 syntax, 366 type) and type information is lost. With the tsserver plugin (`packages/ts-plugin`; in VS Code, the `packages/vscode` extension) the count drops to 0, and completion, type display, go to definition and rename work through `boundary` and `decode` (see the editor-support section of DECISIONS.md).
+
+### 2. IO: broken data doesn't bring it down; it says why and catches up
+
+The E2E suite is 31 scenarios × 3 browsers = 93 tests, and all of them pass. No scenario produces an uncaught exception in the page. After the faults stop, the app's state and the screen match the server's state, and no value on screen ever goes back to an older version.
+
+- Broken JSON, binary frames and schema changes (UUID order IDs, numeric prices) are rejected with a reason (path, expected type, actual type). The gaps that the rejections leave are filled by the snapshot.
+- Alternative encodings of the same value (numeric IDs, NFD, times in UTC or India time, trailing zeros) are read as the same value and not reported as problems.
+- Order IDs above 2^53, quantities and prices stay exact in both directions. When a 500 comes back after the order was created, the app resends with the same `clientOrderId`, and there is still only one order.
+- Client and server count the memo's characters with the same core. A memo of 14 copies of the Khmer "ស្ត្រី" is 14 characters under Unicode 17 and 42 under Unicode 16. Counted with Intl.Segmenter, it is 14 in Chromium and Firefox, **42 in WebKit**, and 42 on the server too (Node's ICU is 16.0). Checking the 32-character limit with Intl would reject the input only in Safari, and the server would reject an order that Chrome accepted. With the core, all 3 browsers and the server agree on 14. When CSP forbids WASM, the app shows a halt screen instead of falling back to the browser's ICU.
+- Large data: with a snapshot of 20,000 orders, it takes about 2.2 seconds from opening the page to going real-time (2026-10-12; 4.8 to 6.8 seconds on the heavily loaded 2026-10-14). Nesting 100,000 levels deep gets through `JSON.parse` in all 3 browsers, and decode ignores it as an extra field. Typing one grapheme of 100,000 characters into the memo takes 0.4 to 1.3 seconds until the character count appears (1.3 to 2.2 seconds on 2026-10-14). The Text operations themselves take 70ms for `Text.nfc` and 28ms for `Text.length` in Node; the rest is the browser's input handling and rendering.
+
+### 3. Real-time sync: converges under latency, reordering, loss and disconnects
+
+- It converges under each of: latency and jitter, reordering, duplicates, loss, disconnects (with close / TCP only), server restarts, silence, and all of them at once. While disconnected or silent, values are labelled "as of seq N" and never presented as real-time.
+- **A design problem we found**: at first the app rendered React on every message. At around 1,000 messages per second the main thread saturated, and WebSocket messages piled up in the page's event queue. The time from send to display kept growing, into seconds (p50 1.3 to 1.8 seconds). The app's own "server seq − applied seq" couldn't see this backlog, so at first it wrongly looked as if the app was keeping up. Batching notifications to the UI to once per frame brought send to display down to p95 20 to 60ms, even at 2,000 messages per second.
+- The language guarantees only that everything goes through decode and that `latest` discards stale answers. Ordering and convergence are handled by the app's design (seq, holding, gap timeouts, heartbeats, snapshots). Nothing turned up that the language itself should add.
+
+### 4. Responsiveness
+
+| Item | Result (ratio to the baseline, 2026-10-14) |
+|---|---|
+| decode (Node) | 0.44–0.59× Zod with the same checks (two runs on the final code). 0.99–1.21× the TS app's plain Zod, which does no bigint conversion and no decimal, time or Text normalization (about the same speed while doing more work). Before optimization: 1.04–1.26× Zod with the same checks |
+| decode (browser) | 0.21–0.39× Zod with the same checks. Before optimization: 0.54–1.18× |
+| Text.length (uncached) | Faster than counting with Intl.Segmenter in every environment and on every string (0.01–0.76×). Japanese and ASCII are answered in JS alone, in 0.1–0.5µs. Emoji and Khmer, which go through WASM, are still 0.4–0.8×. Before optimization: 0.45–0.94× |
+| Text.slice(t, 0, 10) (uncached) | 0.01–1.13× iterating with Intl. Even on a 10KB string it processes only the first 10 graphemes, so 0.01–0.04× (before optimization it was 14–36× slower) |
+| Text.nfc | 0.64–4.7× native `normalize`. Japanese, ASCII and emoji are 0.6–2.1× (answered in JS alone); strings with characters that normalization can change (Khmer, Latin with combining characters) are 2.3–4.7× (they go through WASM's quick check and normalization). Before optimization: 11–36× (up to 75× on ASCII) |
+| Server send to display | p95 ratio to the TS + Zod version: Chromium 0.95–1.03, WebKit 1.13–1.17 (WebKit was measured again after a run disturbed by load; see the top of RESULTS.md). Decoding and applying one message takes 0.02–0.14ms, with no difference between the two |
+| WASM core start-up cost | Time to the start of main becomes 1.10× in Chromium and 1.27× in WebKit (in this run load inflated the absolute cost to 38–60ms; on the lightly loaded 2026-10-12 it was 3–9ms) |
+| `seamc check` | 1.19–1.36× tsc on the same program (before optimization: 1.77×). A `--watch` recheck takes about 1.3 seconds (the first check about 2.7 seconds) |
+| Bundle (gzip) | 81.7KB without the core, 17KB smaller than the TS + Zod version (98.9KB). The core adds 108.5KB (190.2KB in total). That is 6KB more than before optimization, for the fast-path tables and the quick check |
+
+The budgets (`bench/budgets.json`) hold the values above as ratios to baselines measured in the same run. CI runs them with `--quick` and fails if any budget is exceeded.

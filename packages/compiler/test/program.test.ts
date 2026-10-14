@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { check, cleanup } from "./helpers.js";
+import { check, codesByLine, cleanup } from "./helpers.js";
 
 afterAll(cleanup);
 
@@ -56,6 +56,29 @@ describe("type checking .seam.ts", () => {
   it("accepts the spec's examples under --strict", () => {
     const { diagnostics } = check({ "order.seam.ts": ORDER });
     expect(diagnostics).toEqual([]);
+  });
+
+  it("keeps a generic latest function's type arguments, at calls and in forks", () => {
+    const source = `boundary Order { id: Int64 }
+export latest async function first<T>(items: T[], signal: AbortSignal): Promise<Result<T, string>> {
+  return items.length > 0 ? ok(items[0]!) : err("empty");
+}
+export async function use(orders: Order[]) {
+  const r = await first(orders);
+  const id: bigint | undefined = r.ok ? r.value.id : undefined;
+  const line = first.fork<string>();
+  const s = await line(["a"]);
+  const text: string | undefined = s.ok ? s.value : undefined;
+  return [id, text];
+}
+export async function wrong(orders: Order[]) {
+  const r = await first(orders);
+  const n: number | undefined = r.ok ? r.value.id : undefined;
+  return n;
+}
+`;
+    // Only the deliberate mistake: T is Order there, so r.value.id is a bigint.
+    expect(codesByLine(source.replace("export latest", "import { ok, err } from \"@seamscript/runtime\";\nexport latest"))).toEqual([[16, "TS2322"]]);
   });
 
   it("lets plain .ts files import boundaries from .seam.ts", () => {

@@ -36,6 +36,9 @@ export function parse(source: string, jsx: boolean): t.File {
   return babelParse(source, {
     sourceType: "module",
     plugins: jsx ? ["jsx", "typescript", "seamscript"] : ["typescript", "seamscript"],
+    // The transform edits text by position; comments stay in place without being
+    // attached to nodes, which is a measurable part of parsing.
+    attachComment: false,
   }) as unknown as t.File;
 }
 

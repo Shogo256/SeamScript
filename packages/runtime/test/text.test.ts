@@ -74,6 +74,7 @@ describe("grapheme operations", () => {
   it("reports the fallback as non-deterministic", () => {
     expect(Text.deterministic).toBe(false);
     expect(Text.unicodeVersion).toBeNull();
+    expect(Text.status).toBe("host");
   });
 });
 
@@ -89,14 +90,19 @@ describe("core", () => {
     const core = {
       normalize: vi.fn((s: string, f: "NFC" | "NFD") => s.normalize(f)),
       // Deliberately different from ICU: one grapheme per code point.
-      graphemeBoundaries: vi.fn((s: string) => {
+      graphemeCount: vi.fn((s: string) => [...s].length),
+      graphemeBoundaries: vi.fn((s: string, limit = Infinity) => {
         const out = [0];
-        for (const cp of s) out.push(out[out.length - 1]! + cp.length);
-        return Uint32Array.from(out);
+        for (const cp of s) {
+          if (out.length > limit) break;
+          out.push(out[out.length - 1]! + cp.length);
+        }
+        return out;
       }),
       unicodeVersion: "16.0.0",
     };
     rt.__installCore(core);
+    expect(rt.Text.status).toBe("core");
     expect(rt.Text.deterministic).toBe(true);
     expect(rt.Text.unicodeVersion).toBe("16.0.0");
     expect(rt.Text.length(rt.Text.nfc(flags))).toBe(4);
@@ -107,6 +113,7 @@ describe("core", () => {
     const rt = await freshRuntime();
     const cause = new Error("CSP blocked WebAssembly");
     rt.__coreFailed(cause);
+    expect(rt.Text.status).toBe("failed");
     expect(() => rt.Text.nfc("x")).toThrow(rt.CoreUnavailableError);
     expect(() => rt.__decode(rt.__b.text("NFC"), "x")).toThrow(rt.CoreUnavailableError);
     try {

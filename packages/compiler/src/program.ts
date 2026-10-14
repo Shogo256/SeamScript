@@ -7,12 +7,18 @@
 // expressions that bring in outside data, those are wrapped in `__unknown(...)` in
 // the original source's coordinates (so there is still one source map per file),
 // and the second build, which reuses every unchanged file, is type-checked and
-// checked for Unknown flows. tsc runs twice, so checking costs roughly 2× plain tsc.
+// checked for Unknown flows. The first build asks the type checker only about
+// member accesses named like a source (json, parse, data, ...), so it costs a
+// small part of a full check; without any source, it is the final build.
 import { decodedMappings, originalPositionFor, TraceMap } from "@jridgewell/trace-mapping";
-import ts from "typescript";
-import { checkFlows, type Finding, findSources } from "./checker.js";
+// Loaded with require: importing TypeScript's CommonJS API as ESM makes Node
+// scan all of it for export names first, about 100 ms on every run.
+import ts = require("typescript");
+import { createChecker, type Finding } from "./checker.js";
 import type { Diagnostic } from "./diagnostics.js";
 import { isSeamFile, RUNTIME_MODULE, type TransformResult, transform, type UnknownWrap } from "./transform.js";
+
+const { findSources, checkFlows } = createChecker(ts);
 
 export interface SeamProgram {
   /** The final (second) program. */
@@ -23,16 +29,58 @@ export interface SeamProgram {
   diagnostics(): Diagnostic[];
 }
 
-function seamHost(host: ts.CompilerHost, transformed: (fileName: string) => TransformResult | undefined): ts.CompilerHost {
+/**
+ * Source files are handed out once per file (per transform result for `.seam.ts`),
+ * so the second program gets the first one's objects for everything that did not
+ * change, and TypeScript reuses them parsed and bound instead of starting over
+ * (lib.dom.d.ts alone is most of the parse time).
+ */
+type SourceFiles = {
+  plain: Map<string, ts.SourceFile | undefined>;
+  seam: WeakMap<TransformResult, ts.SourceFile>;
+};
+
+/**
+ * What a watch keeps from one check to the next: parsed files and transform
+ * results whose text did not change. Create one with `createSeamCache()` and pass
+ * it to every `createSeamProgram` of the same project and options.
+ */
+export interface SeamCache {
+  readonly plain: Map<string, { text: string; file: ts.SourceFile }>;
+  readonly seam: WeakMap<TransformResult, ts.SourceFile>;
+  readonly transforms: Map<string, { key: string; result: TransformResult }>;
+}
+
+export function createSeamCache(): SeamCache {
+  return { plain: new Map(), seam: new WeakMap(), transforms: new Map() };
+}
+
+function seamHost(host: ts.CompilerHost, files: SourceFiles, transformed: (fileName: string) => TransformResult | undefined, cache?: SeamCache): ts.CompilerHost {
   const readFile = host.readFile.bind(host);
   const getSourceFile = host.getSourceFile.bind(host);
+  const parse = (fileName: string, languageVersion: ts.ScriptTarget | ts.CreateSourceFileOptions, onError?: (message: string) => void, shouldCreate?: boolean) => {
+    if (cache === undefined) return getSourceFile(fileName, languageVersion, onError, shouldCreate);
+    const text = readFile(fileName);
+    if (text === undefined) return undefined;
+    const kept = cache.plain.get(fileName);
+    if (kept?.text === text) return kept.file;
+    const file = ts.createSourceFile(fileName, text, languageVersion);
+    cache.plain.set(fileName, { text, file });
+    return file;
+  };
   return {
     ...host,
     readFile: (fileName) => (isSeamFile(fileName) ? transformed(fileName)?.code : readFile(fileName)),
     getSourceFile: (fileName, languageVersion, onError, shouldCreate) => {
-      if (!isSeamFile(fileName)) return getSourceFile(fileName, languageVersion, onError, shouldCreate);
+      if (!isSeamFile(fileName)) {
+        if (!files.plain.has(fileName)) files.plain.set(fileName, parse(fileName, languageVersion, onError, shouldCreate));
+        return files.plain.get(fileName);
+      }
       const r = transformed(fileName);
-      return r === undefined ? undefined : ts.createSourceFile(fileName, r.code, languageVersion, true);
+      if (r === undefined) return undefined;
+      let sf = files.seam.get(r);
+      if (sf === undefined) files.seam.set(r, (sf = ts.createSourceFile(fileName, r.code, languageVersion, true)));
+      return sf;
     },
   };
 }
@@ -40,30 +88,49 @@ function seamHost(host: ts.CompilerHost, transformed: (fileName: string) => Tran
 export interface SeamProgramOptions {
   /** Transform for production: every `.seam.ts` file imports `@seamscript/core`. */
   production?: boolean;
+  /** Reuse work from earlier programs of the same project (a watch). */
+  cache?: SeamCache;
 }
 
 export function createSeamProgram(
   rootNames: readonly string[],
   options: ts.CompilerOptions,
   host: ts.CompilerHost = ts.createCompilerHost(options),
-  { production = false }: SeamProgramOptions = {},
+  { production = false, cache }: SeamProgramOptions = {},
 ): SeamProgram {
+  // A transform depends only on the text, the wraps and production.
+  const transformCached = (source: string, fileName: string, wraps: readonly UnknownWrap[] | undefined): TransformResult => {
+    if (cache === undefined) return transform(source, fileName, { wraps, production });
+    const key = `${production}:${JSON.stringify(wraps ?? [])}:${source}`;
+    const kept = cache.transforms.get(`${fileName}\0${wraps === undefined ? 0 : 1}`);
+    if (kept?.key === key) return kept.result;
+    const result = transform(source, fileName, { wraps, production });
+    cache.transforms.set(`${fileName}\0${wraps === undefined ? 0 : 1}`, { key, result });
+    return result;
+  };
   const originals = new Map<string, string | undefined>();
   const original = (fileName: string) => {
     if (!originals.has(fileName)) originals.set(fileName, host.readFile(fileName));
     return originals.get(fileName);
   };
 
+  const files: SourceFiles = { plain: new Map(), seam: cache?.seam ?? new WeakMap() };
+
   // Pass 1: plain transform.
   const first = new Map<string, TransformResult>();
-  const host1 = seamHost(host, (f) => {
-    if (!first.has(f)) {
-      const source = original(f);
-      if (source === undefined) return undefined;
-      first.set(f, transform(source, f, { production }));
-    }
-    return first.get(f);
-  });
+  const host1 = seamHost(
+    host,
+    files,
+    (f) => {
+      if (!first.has(f)) {
+        const source = original(f);
+        if (source === undefined) return undefined;
+        first.set(f, transformCached(source, f, undefined));
+      }
+      return first.get(f);
+    },
+    cache,
+  );
   const program1 = ts.createProgram(rootNames, options, host1);
 
   const wraps = new Map<string, UnknownWrap[]>();
@@ -83,22 +150,29 @@ export function createSeamProgram(
     if (mapped.length > 0) wraps.set(fileName, mapped);
   }
 
-  // Pass 2: files with sources are transformed again with their wraps.
-  const outputs = new Map<string, TransformResult>();
-  const host2 = seamHost(host, (f) => {
-    if (!outputs.has(f)) {
-      const w = wraps.get(f);
-      const reuse = first.get(f);
-      if (w === undefined && reuse !== undefined) outputs.set(f, reuse);
-      else {
-        const source = original(f);
-        if (source === undefined) return undefined;
-        outputs.set(f, transform(source, f, { wraps: w, production }));
+  // Pass 2: files with sources are transformed again with their wraps. Without
+  // any, the first program is already the final one.
+  const outputs = new Map<string, TransformResult>(wraps.size === 0 ? first : []);
+  const host2 = seamHost(
+    host,
+    files,
+    (f) => {
+      if (!outputs.has(f)) {
+        const w = wraps.get(f);
+        const reuse = first.get(f);
+        if (w === undefined && reuse !== undefined) outputs.set(f, reuse);
+        else {
+          const source = original(f);
+          if (source === undefined) return undefined;
+          outputs.set(f, transformCached(source, f, w));
+        }
       }
-    }
-    return outputs.get(f);
-  });
-  const program = ts.createProgram(rootNames, options, host2, program1);
+      return outputs.get(f);
+    },
+    cache,
+  );
+  const program = wraps.size === 0 ? program1 : ts.createProgram(rootNames, options, host2, program1);
+  const finalHost = wraps.size === 0 ? host1 : host2;
 
   return {
     program,
@@ -115,7 +189,7 @@ export function createSeamProgram(
         out.push(...r.diagnostics);
         const sf = program.getSourceFile(fileName);
         if (r.syntaxError || sf === undefined) continue;
-        const runtime = ts.resolveModuleName(RUNTIME_MODULE, fileName, options, host2).resolvedModule?.resolvedFileName;
+        const runtime = ts.resolveModuleName(RUNTIME_MODULE, fileName, options, finalHost).resolvedModule?.resolvedFileName;
         for (const f of checkFlows(program, sf, runtime)) out.push(fromFinding(f, fileName, sf, mapOf(fileName, r)));
       }
       for (const d of ts.getPreEmitDiagnostics(program)) {

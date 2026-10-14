@@ -1,140 +1,259 @@
-# 決定記録
+# Decision record
 
-仕様書（初版・11ページ版）に書かれていないこと、仕様から変えたことを記録する。仕様 v2 にまとめて反映する前提の一時置き場。
+This file records what the initial specification (the first edition, 11 pages; it is not included in this repository) doesn't say, and what was changed from it. It is a temporary holding place until everything is folded into version 2 of the specification.
 
-## 仮決め（レビューで挙げた点）
+## Provisional decisions (points raised in review)
 
-| # | 決めたこと | 理由 |
+| # | Decision | Reason |
 |---|---|---|
-| P1 | core が読めないとき、データが原因の失敗は今までどおり Result で返し、`CoreUnavailableError` だけは `decode` からも投げる。core の入口は top-level await を reject させず、失敗したら `__coreFailed(cause)` を呼ぶ。ランタイム側の受け口は `__installCore` / `__coreFailed` | top-level await が reject するとアプリ全体の評価が止まり、`CoreUnavailableError` まで届かない。CSP 設定ミスは環境の問題なので、各 `r.ok` 分岐で扱わせるより大きく落とす方がよい |
-| P2 | `latest` の `cancel()` 後に終わった呼び出しは、最新のものでも Stale | アンマウント時の cancel で AbortError が呼び出し側に漏れないようにする |
-| P3 | `encode` で Int64 が範囲外なら `EncodeRangeError`（`RangeError` のサブクラス。`path` 付き）を投げる | `JSON.stringify(Order.encode(o))` とそのまま書けるようにする。範囲外は演算のバグなので例外が妥当 |
-| P4 | Decimal は正規化を維持し、表示用に `Decimal.toFixed(d, digits)` を足す。丸めは halfExpand（`Intl.NumberFormat` の既定と同じ）で、負のゼロは出さない | `===` の値比較を残しつつ、金額表示の桁を回復する |
+| P1 | When the core can't be loaded, failures caused by the data are still returned as a Result, as before; only `CoreUnavailableError` is thrown, even from `decode`. The core's entry point never lets its top-level await reject; when loading fails, it calls `__coreFailed(cause)`. On the runtime side, the receiving functions are `__installCore` / `__coreFailed` | If the top-level await rejects, evaluation of the whole app stops and never gets as far as `CoreUnavailableError`. A CSP misconfiguration is a problem with the environment, so failing loudly is better than making every `r.ok` branch handle it |
+| P2 | A call to a `latest` function that finishes after `cancel()` is Stale, even if it is the most recent call | Keeps an AbortError from leaking to the caller when `cancel()` runs on unmount |
+| P3 | If an Int64 is out of range, `encode` throws `EncodeRangeError` (a subclass of `RangeError`, with a `path`) | So you can write `JSON.stringify(Order.encode(o))` directly. An out-of-range value is an arithmetic bug, so an exception is appropriate |
+| P4 | Decimal values stay normalized, and `Decimal.toFixed(d, digits)` is added for display. It rounds with halfExpand (the same as the `Intl.NumberFormat` default) and never produces negative zero | Keeps value comparison with `===` while getting back the digits needed to display money amounts |
 
-開発ビルドのコンパイラは `@seamscript/core` を import しないので、開発中は常にフォールバック（`Intl.Segmenter` と `normalize`）で動く。そのとき `Text.deterministic` は `false`、`Text.unicodeVersion` は `null`。
+In development builds the compiler doesn't import `@seamscript/core`, so during development Text always runs on the fallback (`Intl.Segmenter` and `normalize`). In that case `Text.deterministic` is `false` and `Text.unicodeVersion` is `null`.
 
-## 実装中に決めたこと
+## Decisions made during implementation
 
-### 仕様から変えたもの
+### Changes from the specification
 
-- **`Text.concat` の代わりに `Text.nfc(...parts)` / `Text.nfd(...parts)`**。実行時の Text はただの文字列なので、値を見ても NFC か NFD かを判別できない（ASCII はどちらも満たす）。NFC の文字列同士を連結しても NFC になるとは限らない（`"e"` + `"́"`）ので、連結後にどちらへ正規化し直すかを呼び出し側が指定する必要がある。
-- **boundary 定数には型注釈を付けて出力する**：`export const Order: ObjectDecoder<Order> = __b.object<Order>({...})`。仕様の出力例のように注釈がないと、再帰する boundary（`__b.lazy(() => Order)`）が TS7022（自分の初期化子で参照されている）になる。union は `Decoder<Event>`。
-- **`latest` の signal 指定は `{ signal: true }` ではなく `{ signal: <引数の位置> }`**。「最後の引数」と決めると、その前の省略可能引数が省略されたときに signal が別の引数の位置にずれる。位置はコンパイラが知っている。
-- **型の印は `__seam` という文字列キーではなく、export しない `unique symbol`**。文字列キーだと、実在しない `t.__seam` が型の上では読めてしまう。
-- **`Unknown.inspect` は `Unknown.log` に置き換わっている**（改訂版の仕様どおり）。`void` を返す。
+- **`Text.nfc(...parts)` / `Text.nfd(...parts)` instead of `Text.concat`.** At runtime a Text is just a string, so you can't tell from the value whether it is NFC or NFD (ASCII satisfies both). Concatenating NFC strings doesn't always give an NFC string (`"e"` + `"́"`), so the caller has to say which form to normalize to again after concatenating.
+- **Boundary constants are emitted with a type annotation**: `export const Order: ObjectDecoder<Order> = __b.object<Order>({...})`. Without the annotation, as in the specification's output example, a recursive boundary (`__b.lazy(() => Order)`) causes TS7022 (it is referenced in its own initializer). For a union it is `Decoder<Event>`.
+- **`latest` gives the signal as `{ signal: <parameter position> }`, not `{ signal: true }`.** If the rule were "the last parameter", then when an optional parameter before it is omitted, the signal would shift into another parameter's position. The compiler knows the position.
+- **The type brand is an unexported `unique symbol`, not a string key `__seam`.** With a string key, a nonexistent `t.__seam` could be read at the type level.
+- **`Unknown.inspect` is replaced by `Unknown.log`** (as in the revised specification). It returns `void`.
 
-### 仕様に書かれていなかったもの
+### Not covered by the specification
 
-- **Text**：decode は不正な UTF-16（孤立サロゲート）を拒否する。コンストラクタ（`Text.nfc` など）は失敗させず U+FFFD に置き換える（UTF-8 ベースの WASM core でも同じ結果になる）。印字可能な ASCII は分割処理を通さない（どの Unicode バージョンでも1文字1グラフェム）。
-- **Int64**：文字列は正準形だけを受ける。`"007"`、`"-0"`、`"+1"`、指数表記は拒否する。ゼロ埋めの文字列はたいてい数値ではなくコードなので、黙って `7n` にしない。
-- **Decimal**：指数表記（`"1E+3"`）は拒否する。→ 未決にも記載。
-- **Zoned の正規形**：秒は常に出す。小数部は末尾のゼロを落とし、最大9桁。オフセット0は `Z` と書く。`-00:00`（RFC 3339 で「オフセット不明」）、`24:00`、閏秒、存在しない日付は拒否する。区切りは `T` / `t` のみ。`Zoned.compare` は瞬間だけで比べる（オフセットだけ違う値は 0）。
-- **`Decimal.from` / `Zoned.from`** はプログラム内のリテラル用で、不正なら `SyntaxError` を投げる。外から来た文字列は `decode` を通す。
-- **DecodeError.actual** は型名を返し、値は出さない（ログに個人情報が混ざるのを避ける）。例外はリテラルの不一致で、40 文字以下の文字列と数値だけ値を見せる（`"pending"` vs `"paid" | "open"`）。
-- **decode の入れ子は 512 段まで**（`MAX_DEPTH`）。超えたら失敗として返す。スタックオーバーフローを防ぎ、postMessage で来る循環データも止める。
-- **decode は自分のプロパティだけを読む**（`constructor` という名前のフィールドが欠けていても prototype を読まない）。`__proto__` キーは prototype を書き換えないように書く。getter や Proxy が投げる例外は `"unreadable"` という失敗にする。
-- optional のフィールドに自分のプロパティとして `undefined` が入っていたら（postMessage 経由）、キーが無いのと同じに扱う。
-- `Decoder` の内部書き出しはメソッド構文にしてある。これで `Decoder<Order>` を `Decoder<unknown>` として扱える（union のメンバーやデコーダの配列）。
+- **Text**: decode rejects malformed UTF-16 (lone surrogates). The constructors (`Text.nfc` and so on) don't fail; they replace lone surrogates with U+FFFD (the UTF-8-based WASM core gives the same result). Printable ASCII skips segmentation (in every Unicode version, each such character is one grapheme).
+- **Int64**: strings are accepted only in canonical form. `"007"`, `"-0"`, `"+1"` and exponent notation are rejected. A zero-padded string is usually a code, not a number, so it is not silently turned into `7n`.
+- **Decimal**: exponent notation (`"1E+3"`) is rejected. → Also listed under Open questions.
+- **Canonical form of Zoned**: seconds are always written. The fractional part drops trailing zeros and has at most 9 digits. A zero offset is written as `Z`. `-00:00` (which means "offset unknown" in RFC 3339), `24:00`, leap seconds and nonexistent dates are rejected. The date-time separator must be `T` or `t`. `Zoned.compare` compares only the instant (values that differ only in their offset compare as 0).
+- **`Decimal.from` / `Zoned.from`** are for literals in the program and throw `SyntaxError` on invalid input. Strings from outside go through `decode`.
+- **DecodeError.actual** gives the type name and never the value (to keep personal data out of logs). The exception is a literal mismatch: only strings of 40 characters or fewer and numbers show their value (`"pending"` vs `"paid" | "open"`).
+- **decode goes at most 512 levels deep** (`MAX_DEPTH`). Beyond that it returns a failure. This prevents stack overflows and also stops cyclic data arriving through postMessage.
+- **decode reads only own properties** (if a field named `constructor` is missing, it doesn't read it from the prototype). A `__proto__` key is written in a way that doesn't change the prototype. Exceptions thrown by getters or Proxies become an `"unreadable"` failure.
+- If an optional field holds `undefined` as an own property (which happens with postMessage), it is treated the same as a missing key.
+- The internal declaration of `Decoder` uses method syntax. This lets a `Decoder<Order>` be treated as a `Decoder<unknown>` (for union members and arrays of decoders).
 
-## コンパイラで決めたこと
+## Compiler decisions
 
-### パーサ（`packages/parser`）
+### Parser (`packages/parser`)
 
-- 仕様どおり `@babel/parser` を fork した（8.0.7）。ただし TS プラグインには手を入れず、`src/plugins/seamscript.ts` という新しい mixin を足して、`plugin-utils.ts` で登録するだけにした。upstream との差分はこの1ファイルと数行。追従手順は `packages/parser/UPSTREAM.md`。
-- **fork が既存の TS の意味を変えていないこと**を、差分テストで確認している。upstream の約 6,000 のフィクスチャを、公開版 `@babel/parser@8.0.7` と fork の両方でパースし、AST と エラーが完全に一致すること。さらに TS のフィクスチャ約 700 については、seamscript プラグインを有効にしても一致すること。`errorRecovery` の有無の両方で比べている。
-- `boundary` / `decode` / `latest` は、TS では構文エラーになる形（キーワードの直後に、同じ行で別の名前が続く）のときだけ構文として認識する。ただし直後が `as` / `satisfies` / `of` のときは普通の識別子のまま（`decode as T` は有効な TS なので）。
-- `decode` の型の直後に `(` は書けない。`decode (A | null)[] from v` は関数呼び出し `decode(...)` と区別できないため。
-- `export boundary` / `export latest` だけが export になる。仕様の出力例では export のない `boundary Order` が `export type` / `export const` になっているが、TS の他の宣言と同じく、明示したときだけ export する。
+- As the specification says, `@babel/parser` is forked (8.0.7). The TS plugin itself is left untouched: a new mixin, `src/plugins/seamscript.ts`, is added and registered in `plugin-utils.ts`. The difference from upstream is this one file plus a few lines. The steps for following upstream are in `packages/parser/UPSTREAM.md`.
+- **A differential test confirms that the fork doesn't change the meaning of existing TS.** About 6,000 upstream fixtures are parsed with both the published `@babel/parser@8.0.7` and the fork, and the ASTs and errors must match exactly. In addition, about 700 TS fixtures must still match with the seamscript plugin enabled. Both comparisons run with and without `errorRecovery`.
+- `boundary` / `decode` / `latest` are recognized as syntax only in forms that are syntax errors in TS (another name follows the keyword on the same line). If the next word is `as` / `satisfies` / `of`, the keyword stays an ordinary identifier (`decode as T` is valid TS).
+- When `decode` is followed by `(`, the parser tries to read a type, and accepts it as decode only if `from` follows on the same line. Otherwise it backtracks and reads a function call, `decode(...)`. This makes `decode (A | null)[] from v` possible. A valid TS call is never followed by `from`, so the meaning doesn't change (confirmed by the differential test against the upstream fixtures and by a test that lists call shapes side by side).
+- Only `export boundary` / `export latest` are exported. In the specification's output example, a `boundary Order` without `export` becomes `export type` / `export const`, but like other TS declarations, a boundary is exported only when you say so.
 
-### 変換（`packages/compiler/src/transform.ts`）
+### Transform (`packages/compiler/src/transform.ts`)
 
-- 出力は元のテキストに編集を差し込む形で作る（magic-string）。5構文以外は、コメントや書式も含めて1バイトも変わらない。ソースマップは1つだけ。checker の `__unknown(...)` で包む箇所も元のソースの座標で同じ変換に入れるので、仕様の「2段のソースマップ」は1段になる。
-- boundary の定数には型注釈を付ける（`const Order: ObjectDecoder<Order> = ...`。前回の記録どおり）。
-- boundary のフィールドからほかの boundary を参照するとき：同じファイルで先に宣言されていれば直接参照し、それ以外（自分自身、後で宣言されるもの、import したもの）は `__b.lazy(() => X)` にする。import の循環でも、初期化前の参照（TDZ）にならない。
-- union boundary の判別フィールドは、ランタイムが初回使用時に自分で探す（`__b.union<T>(() => [A, B])`）。コンパイラは型情報なしで動くので、別ファイルのメンバーの中身を知らない。メンバーが全部同じファイルにあるときは、コンパイル時にも判別フィールドを検査する（SEAM1105）。
-- `latest` の出力は次の3つ。`function f(...args) { return __latestFor(f__impl, opts).apply(undefined, args) }`、`f.fork = ...`、`async function f__impl(...)`。spread でなく `apply` にしたのは、checker が Unknown の spread を禁じており、latest 関数が Unknown を引数に取るのは正当なため。
-- signal の有無は構文で判定する。最後の引数の型注釈が `AbortSignal` という名前かどうか。型の別名を経由した `AbortSignal` は検出できない。
-- 自動で import するランタイムの名前は2種類。値は `Text` / `Int64` / `Decimal` / `Zoned` / `Unknown` / `fetch`、型は `Result` / `Ok` / `Err` / `DecodeError` / `Stale`。そのファイルが同じ名前を自分で束縛していない（import も宣言もしていない）ときだけ足す。`ok` / `err` は名前が一般的すぎるので、自動では import しない。
-- `seamc build` の出力は、ファイル名を `x.seam.ts` のまま変えない。中身は素の TS だが、ほかのファイルの `import "./x.seam"` が書き換えなしで解決できる。
-- decode の対象には、組み込み型、boundary 名、`T[]` に加えて、`T | null` とリテラル型も書ける（未決だった3を解決）。
+- The output is built by splicing edits into the original text (magic-string). Outside the five constructs, not a single byte changes, including comments and formatting. There is only one source map. The places where the checker wraps code in `__unknown(...)` go into the same transform, in the coordinates of the original source, so the specification's "two-stage source map" becomes a single stage.
+- Boundary constants get a type annotation (`const Order: ObjectDecoder<Order> = ...`, as recorded above).
+- When a boundary field refers to another boundary: if that boundary is declared earlier in the same file, it is referenced directly; otherwise (the boundary itself, one declared later, or an imported one), the reference becomes `__b.lazy(() => X)`. This avoids references before initialization (TDZ) even with import cycles.
+- For a union boundary, the runtime finds the discriminant field itself on first use (`__b.union<T>(() => [A, B])`). The compiler works without type information, so it doesn't know the contents of members in other files. When all members are in the same file, the discriminant field is also checked at compile time (SEAM1105).
+- `latest` emits three things: `function f(...args) { return __latestFor(f__impl, opts).apply(undefined, args) }`, `f.fork = ...`, and `async function f__impl(...)`. It uses `apply` instead of a spread because the checker forbids spreading Unknown, and a latest function taking Unknown arguments is legitimate.
+- Whether there is a signal is decided from the syntax: whether the type annotation of the last parameter is the name `AbortSignal`. The transform can't see an `AbortSignal` reached through a type alias, so the checker pass finds it by type and reports SEAM1402, asking you to write `AbortSignal` (rather than silently producing a wrapper that doesn't pass the signal).
+- For a generic latest function, the wrapper declares the same type parameters and refers to the implementation as `typeof f__impl<T>` (an instantiation expression). `fork` also takes type arguments (`f.fork<T>()`). If the return type is written as `Promise<X>`, the wrapper's return type is written as `Promise<X | Stale>` (so the editor's hover doesn't show a helper type alias). The copied type text includes the rewrites made so far (`Text<NFC>` → `Text<"NFC">`).
+- `Text`, `Int64`, `Decimal`, `Zoned` and `Unknown` are treated as built-ins only when they refer to the runtime's versions: names that aren't imported (they are imported automatically), names imported from the runtime (including `Text as T`), and members of a namespace import of the runtime (`rt.Text`). A `Text` that the file defines itself or imports from somewhere else is not rewritten, and is not treated as a built-in in boundary fields either.
+- Two kinds of runtime names are imported automatically: the values `Text` / `Int64` / `Decimal` / `Zoned` / `Unknown` / `fetch`, and the types `Result` / `Ok` / `Err` / `DecodeError` / `Stale`. Each is added only when the file doesn't bind the same name itself (neither imports nor declares it). `ok` / `err` are too generic as names, so they are not imported automatically.
+- `seamc build` keeps the output file name as `x.seam.ts`. The content is plain TS, and `import "./x.seam"` in other files resolves without rewriting.
+- The target of decode can be a built-in type, a boundary name, or `T[]`, and also `T | null` and literal types (this resolves open question 3).
 
-### checker パス（`packages/compiler/src/checker.ts`）
+### Checker pass (`packages/compiler/src/checker.ts`)
 
-- TypeChecker API を使うのはこの1ファイルだけ（未決だった4を解決）。使っている API は、`getSymbolAtLocation`、`getTypeAtLocation`、`getContextualType`、`getResolvedSignature`、`getTypeArguments`、`getPropertiesOfType`、`getTypeOfSymbol`、`isTypeAssignableTo`、`isTupleType`、`isArrayLikeType`、`getIndexTypeOfType`、`getAwaitedType`、`getExportsOfModule`、`getAliasedSymbol`、`getDeclaredTypeOfSymbol`。`typescript` は 5.9.3 に固定している。
-- 発生源は TS の lib の宣言で判定する。対象は `Body.json`（Response と Request）、`JSON.parse`、`Storage.getItem`、`URLSearchParams.get` / `getAll`、`MessageEvent.data`（postMessage、WebSocket、BroadcastChannel）。DOM の入力値は対象にしない。改訂版4節に従ったもので、コンパイル手順3(a)の一覧は古い。
-- 発生源のプロパティを分割代入で取り出すこと（`const { data } = e`）は、追跡せずエラーにする（SEAM2004）。束縛要素を Unknown 型に置き換える方法がないため。
-- 流出検査は許可リスト方式。Unknown を含む式が流れ込んでよいのは、`decode`、`Unknown.log`、それから流入先の文脈型でも同じ位置に Unknown が残る場所だけ。エラーになるのは、`as`、unknown / any / {} / object / `Object` への代入、型のない関数への引数、`throw`、テンプレート文字列、`+` による連結、`in` 演算子、それに Unknown を消す先への spread。`in` を入れたのは、`"id" in v` で `{ id: unknown }` に絞り込まれて、decode を経ずに抜けられるため。
-- 「Unknown を受け取って any / unknown / {} / object を返す呼び出し」はエラーにする（SEAM2002）。未決だった2を解決し、`launder<T>(x: T): unknown` 経由の抜け道も塞いだ。
-- TypeScript 自体が代入を拒否する場合（Unknown は string に代入できない、など）は、TS のエラーに任せて重複して報告しない。ただし `as` は例外で、TS2352 と SEAM2001 の両方が出る。
-- Text の `length` と添字の読み出し、それから UTF-16 単位のメソッドを呼ばずに参照することは、エラーにする（SEAM2101。未決だった1を解決）。メソッドの呼び出しは TS がもともと拒否する。
-- `JSON.stringify` の検査は、引数の型に bigint を含むときだけにした（SEAM2201）。Text / Decimal / Zoned は実行時にはただの文字列なので、壊れない。
+- This is the only file that uses the TypeChecker API (this resolves open question 4). The APIs it uses are `getSymbolAtLocation`, `getTypeAtLocation`, `getContextualType`, `getResolvedSignature`, `getTypeArguments`, `getPropertiesOfType`, `getTypeOfSymbol`, `isTypeAssignableTo`, `isTupleType`, `isArrayLikeType`, `getIndexTypeOfType`, `getAwaitedType`, `getExportsOfModule`, `getAliasedSymbol`, and `getDeclaredTypeOfSymbol`. `typescript` is pinned to 5.9.3.
+- Sources are identified by their declarations in TS's lib. They are `Body.json` (Response and Request), `JSON.parse`, `Storage.getItem`, `URLSearchParams.get` / `getAll`, and `MessageEvent.data` (postMessage, WebSocket, BroadcastChannel). DOM input values are not sources. This follows section 4 of the revised edition; the list in compilation step 3(a) is out of date.
+- Destructuring a property out of a source (`const { data } = e`) is not tracked; it is an error (SEAM2004). There is no way to replace a binding element with the Unknown type.
+- The outflow check uses an allowlist. An expression containing Unknown may flow only into `decode`, `Unknown.log`, and places where the destination's contextual type still has Unknown in the same position. The errors are: `as`, assignment to unknown / any / {} / object / `Object`, an argument to an untyped function, `throw`, template strings, concatenation with `+`, the `in` operator, and a spread into something that erases Unknown. `in` is included because `"id" in v` narrows to `{ id: unknown }`, which lets the value escape without going through decode.
+- A call that takes Unknown and returns any / unknown / {} / object is an error (SEAM2002). This resolves open question 2, and also closes the loophole through `launder<T>(x: T): unknown`.
+- When TypeScript itself rejects an assignment (for example, Unknown isn't assignable to string), the TS error covers it and there is no duplicate report. The exception is `as`, which gets both TS2352 and SEAM2001.
+- Reading `length` or an index on a Text, and referring to a method that works in UTF-16 units without calling it, are errors (SEAM2101; this resolves open question 1). TS already rejects calling those methods.
+- `JSON.stringify` is checked only when the argument's type contains bigint (SEAM2201). Text / Decimal / Zoned are plain strings at runtime, so they don't break.
 
-### 診断コード
+### Diagnostic codes
 
-| コード | 内容 |
+| Code | Meaning |
 |---|---|
-| SEAM1000 | 構文エラー |
-| SEAM1101 | boundary を越えられない型 |
-| SEAM1102 | boundary はモジュールの最上位にしか書けない |
-| SEAM1103 | boundary に書けるのはフィールドだけ |
-| SEAM1104 | union boundary のメンバーは boundary 名だけ |
-| SEAM1105 | union のメンバーに判別フィールドがない |
-| SEAM1106 | boundary でない型を、boundary として参照した |
-| SEAM1301 | `Text<NFC>` / `Text<NFD>` 以外の Text |
-| SEAM1401 | latest 関数はジェネレータにできない |
-| SEAM2001 | Unknown が decode 以外の出口へ流れた |
-| SEAM2002 | Unknown を受け取って any / unknown を返す呼び出し |
-| SEAM2003 | 発生源のメソッドを、呼び出さずに参照した |
-| SEAM2004 | 発生源のプロパティを分割代入した |
-| SEAM2101 | Text への UTF-16 単位のアクセス |
-| SEAM2201 | bigint を含む値を JSON.stringify に渡した |
+| SEAM1000 | Syntax error |
+| SEAM1101 | A type that can't cross a boundary |
+| SEAM1102 | A boundary can only appear at the top level of a module |
+| SEAM1103 | A boundary can contain only fields |
+| SEAM1104 | The members of a union boundary must be boundary names |
+| SEAM1105 | A union member has no discriminant field |
+| SEAM1106 | A type that isn't a boundary is referenced as a boundary |
+| SEAM1301 | A Text other than `Text<NFC>` / `Text<NFD>` |
+| SEAM1401 | A latest function can't be a generator |
+| SEAM1402 | The type of a latest function's AbortSignal parameter isn't written as `AbortSignal` |
+| SEAM2001 | Unknown flows to an exit other than decode |
+| SEAM2002 | A call that takes Unknown and returns any / unknown |
+| SEAM2003 | A source method is referenced without being called |
+| SEAM2004 | A source property is destructured |
+| SEAM2101 | Access to a Text in UTF-16 units |
+| SEAM2201 | A value containing a bigint is passed to JSON.stringify |
 
-## 比較デモで決めたこと（`demo/`）
+## Comparison demo decisions (`demo/`)
 
-- 両側のテストは、バグ1つにつき1本。どれも「そのバグがユーザーに届く前に止まるか」を確かめる形にした。こうすると、TS 側は3本とも赤、SeamScript 側は3本とも緑になり、仕様の「片方だけが落ちることを CI で示す」をそのまま満たす。
-- バグ1は、両側に拡張子以外まったく同じコードを置いた。SeamScript 側の `load-order.seam.ts` は、わざとコンパイルが通らない。テストでは実行せず、`seamc check` が SEAM2001 を出すことだけを確かめる。
-- 仕様の表にある「`no-unsafe-type-assertion` を有効にすれば止まる」は、実際に確かめた（型情報つき lint で、該当行が error になる）。このルールが入っているのは typescript-eslint の `all` プリセットだけ。
-- CI のワークフロー（`.github/workflows/comparison-demo.yml`）は書いただけで、リモートがないため GitHub 上では動かしていない。同じコマンドはローカルで実行し、`yarn install --frozen-lockfile` が通ることも確認した。
-- ルートの `yarn test` には `yarn demo` も含めた。デモが想定どおりの分かれ方をしなくなったら、テスト全体が失敗する。
+- Each side has one test per bug, and every test checks whether the bug is stopped before it reaches the user. That way all three TS tests are red and all three SeamScript tests are green, which directly satisfies the specification's "show in CI that only one side fails".
+- For bug 1, both sides have exactly the same code apart from the file extension. On the SeamScript side, `load-order.seam.ts` deliberately fails to compile. The test doesn't run it; it only checks that `seamc check` reports SEAM2001.
+- The claim in the specification's table that the bug "is stopped if you enable `no-unsafe-type-assertion`" was verified (with type-aware linting, the line becomes an error). Only typescript-eslint's `all` preset includes this rule.
+- The CI workflow (`.github/workflows/comparison-demo.yml`) has been written but has not run on GitHub, because there is no remote. The same commands were run locally, and `yarn install --frozen-lockfile` was confirmed to pass.
+- The root `yarn test` also runs `yarn demo`. If the demo no longer splits the way it should, the whole test run fails.
 
-## WASM コアで決めたこと（`packages/core`）
+## WASM core decisions (`packages/core`)
 
-- **Unicode 17.0.0 に固定**：`unicode-segmentation 1.13.3` と `unicode-normalization 0.1.25` をバージョン指定 `=` で固定した。両者の Unicode バージョンが一致することは、コンパイル時の assert で確かめている。
-- **wasm-bindgen は使わない**：仕様の「wasm-bindgen で公開」からの変更。C ABI の関数7つと、手書きの JS（`js/core.ts`）にした。wasm-bindgen は CLI とクレートのバージョンを完全に揃える必要があり、その CLI は開発シェルにない。公開するのは文字列を受け取る関数2つ（正規化とグラフェム境界）だけなので、生成されるグルーより手書きのほうが短い。
-- **ネイティブでも使えるクレート**：`seamscript-core`（crates.io）の `normalize` / `grapheme_boundaries_utf16` / `UNICODE_VERSION` は、ネイティブの Rust からもそのまま使える。バックエンドが同じクレートの同じバージョンを使えば、「1文字」の定義が一致する。
-- **WASM は base64 で JS に埋め込む**：WASM は 183KB（gzip で 86KB）、埋め込んだ JS は 244KB になる。`new URL("x.wasm", import.meta.url)` で別ファイルとして読む方式は、Vite の依存の事前バンドルなど、バンドラごとに設定が必要になるため避けた。
-- **`@seamscript/runtime` は peerDependency**：コアがアプリとは別コピーのランタイムに差し込まれると、アプリの Text はコアを使わず、黙ってフォールバックで動いてしまう。peerDependency にして、アプリと同じ実体を使わせる。
-- **本番の判定**：Vite プラグインは、`vite build` ならモードに関係なくコアを import する。`config.isProduction` は NODE_ENV に従うので、テストランナーやステージング用のビルドで判定がずれる。そのため使わない。開発サーバーと Vitest はフォールバックで動く。`seamscript({ core })` で上書きできる。CLI では `seamc build --production` を指定する。`@seamscript/core` が解決できなければビルドは失敗し、型検査の段階でも TS2307 になる。
-- **開発シェルに lld を追加**：nixpkgs の rustc は、wasm32 ターゲットのリンクに `lld` を使う。そのため `shell.nix` に `llvmPackages_19.lld` を足した。CI では rustup の rustc を使い、そちらは rust-lld を同梱しているので、`rustup target add wasm32-unknown-unknown` だけで足りる。
+- **Pinned to Unicode 17.0.0**: `unicode-segmentation 1.13.3` and `unicode-normalization 0.1.25` are pinned with `=` version requirements. A compile-time assert checks that both use the same Unicode version.
+- **No wasm-bindgen**: this changes the specification's "expose it with wasm-bindgen". Instead there are seven C ABI functions and hand-written JS (`js/core.ts`). wasm-bindgen requires the CLI and crate versions to match exactly, and that CLI isn't in the development shell. Only two functions that take strings are exposed (normalization and grapheme boundaries), so hand-written glue is shorter than generated glue.
+- **The crate also works natively**: `normalize` / `grapheme_boundaries_utf16` / `UNICODE_VERSION` in `seamscript-core` (crates.io) can be used directly from native Rust. If the backend uses the same version of the same crate, its definition of "one character" matches.
+- **The WASM is embedded in the JS as base64**: the WASM is 183KB (86KB gzipped), and the JS with it embedded is 244KB. Loading it as a separate file with `new URL("x.wasm", import.meta.url)` was avoided because it needs configuration for each bundler, for example for Vite's dependency pre-bundling.
+- **`@seamscript/runtime` is a peerDependency**: if the core plugs into a different copy of the runtime from the app's, the app's Text doesn't use the core and silently runs on the fallback. Making the runtime a peerDependency forces the core to use the same instance as the app.
+- **Detecting production**: the Vite plugin imports the core on `vite build`, whatever the mode. `config.isProduction` follows NODE_ENV, so it gives the wrong answer for test runners and staging builds; that is why it isn't used. The dev server and Vitest run on the fallback. `seamscript({ core })` overrides this. On the CLI, pass `seamc build --production`. If `@seamscript/core` can't be resolved, the build fails, and type checking also reports TS2307.
+- **lld is added to the development shell**: the rustc in nixpkgs uses `lld` to link the wasm32 target, so `llvmPackages_19.lld` is added to `shell.nix`. CI uses rustc from rustup, which bundles rust-lld, so `rustup target add wasm32-unknown-unknown` is enough there.
 
-## 検証で分かったこと
+## Findings from verification
 
-- `latest` の「画面が戻らない」は、**呼び出し側が `await` の直後の最初の継続で結果を反映する場合に限って**保証される。結果を受け取ったあと反映する前に、もう一度 `await` すると順序は保証されない。TLC で、配送が FIFO でなければ反例が出ることを確認した（`spec/latest_unordered.cfg`）。README に書くべきこと。コンパイラの警告にもできる。
-- 正規化済みのテキストをグラフェム境界で切った断片は、正規化されたままになる。プロパティテストで NFC と NFD の両方を確認した。`Text.slice` / `at` / `graphemes` は正規化し直さない。
-- 仕様の出力例 `export const Order = __b.object<Order>({...})` は、再帰する boundary だと TS7022 になる（前回の記録）。
-- **決定性が必要だという実データ**：Node 24.18 の ICU は Unicode 16.0 を実装している。Unicode 17.0 の公式テストデータで比べると、グラフェム分割は 766 件中 10 件、正規化は 20,034 行中 68 行がずれる。WASM コアは全件通る。確かめたのは3つ：GraphemeBreakTest の 766 件をコア単体と Text 経由の両方で、NormalizationTest の 20,034 行を全 Part で、Part 1 の不変条件を全コードポイントで。
-- **公式データのテストで見つかった JS 側のバグ**：`TextDecoder` は既定で、先頭の U+FEFF を BOM とみなして捨てる。そのため、U+FEFF で始まる Text が1文字欠けていた。`ignoreBOM: true` で直し、回帰テストも足した。
+- The `latest` guarantee that "the screen never goes back" holds **only when the caller applies the result in the first continuation right after `await`**. If the caller uses `await` again after receiving the result but before applying it, ordering is not guaranteed. TLC confirms that a counterexample appears when delivery is not FIFO (`spec/latest_unordered.cfg`). This belongs in the README. It could also become a compiler warning.
+- Fragments cut from normalized text at grapheme boundaries stay normalized. Property tests confirm this for both NFC and NFD. `Text.slice` / `at` / `graphemes` don't normalize again.
+- The specification's output example `export const Order = __b.object<Order>({...})` causes TS7022 for a recursive boundary (recorded above).
+- **Real data showing that determinism is needed**: the ICU in Node 24.18 implements Unicode 16.0. Compared against the official Unicode 17.0 test data, grapheme segmentation differs in 10 of 766 cases, and normalization in 68 of 20,034 lines. The WASM core passes all of them. Three things were checked: the 766 GraphemeBreakTest cases, both on the core alone and through Text; the 20,034 NormalizationTest lines, across all Parts; and the Part 1 invariant, over every code point.
+- **A JS-side bug found by the tests on official data**: by default, `TextDecoder` treats a leading U+FEFF as a BOM and drops it. So a Text that started with U+FEFF lost one character. This is fixed with `ignoreBOM: true`, and a regression test was added.
 
-## 未決
+## Decisions from the sandbox demonstration against a mock backend (`sandbox/`)
 
-### コンパイラの既知の制限
+### Setup and subject
 
-- ジェネリックな `latest` 関数は、公開側のシグネチャで型引数を失う（`Parameters<typeof f__impl>` が unknown で具体化される）。
-- `Text<NFC>` の書き換えは、名前が `Text` の型参照すべてに適用する。そのファイルが別の `Text` を import していても書き換えてしまう。
-- 一度目の program は発生源を見つけるためだけに作っている。チェックの時間は素の tsc の約2倍。
-- 既存の `.ts` ファイルから来る `any` は検査の対象外（仕様の「既存コードの境界は守れない」）。
+- **The subject is a high-frequency feed**: a dashboard of stock prices and orders. No use case was specified, so the sandbox picks a demanding one: a high-frequency feed of order-book updates and executions. The benchmarks run at 50 to 2,000 messages per second.
+- **`sandbox/` is a new workspace**: `backend` (the mock backend), `app` (the SeamScript version), `app-ts` (a TS + Zod version for comparison), `e2e` (Playwright), and `bench` (benchmarks). The plan at the start was not to touch packages, but problems found during the demonstration were fixed in packages (see "Fixes to packages found by the demonstration" below).
+- **The mock backend is plain TS** (run directly with Node's type stripping). Its job is to produce invalid data (malformed JSON, schema changes), so writing it in SeamScript would defeat the purpose. Memo length limits, however, are counted with the same `@seamscript/core` the app uses.
+- **Fault injection**: on WS, delay and jitter (order preserved), reordering, duplication, drops, malformed JSON, binary frames, schema changes, different notations of the same value, huge fields, disconnects (with a close frame, or just cutting TCP), refused reconnections, and silence. On HTTP, delay, 500 errors, malformed JSON, schema changes, different notations, huge and deeply nested payloads, per-search and per-detail delays, and "create, then return 500". The randomness is seeded, so the same seed produces the same faults in the same order.
+- **The TS version exists only for performance comparison**: it has the same features and the same sync design, written in the usual TS style (IDs as strings, prices as strings displayed through Number, timestamps as ISO strings, and `latest` written by hand with AbortController and a generation counter). E2E tests run only against the SeamScript version.
 
-### 仕様書の文言
+### App design (decided by the app, not the language)
 
-- 一行定義の「正しい TypeScript はすべて正しい SeamScript」が、改訂した原則1と矛盾している。
-- `seamscript/runtime` が3か所に残っている（原則2、コンパイル手順2、fetch の import 文）。
-- 原則3の「DOM 入力」と、手順3(a)の `HTMLInputElement.value` が、4節と矛盾している。
-- マイルストーンの名前確保の項目に `@seamscript` スコープが入っていない。
-- 比較デモのバグ2は、Text だとコンパイル時に止まる（`t.slice` は `never` を呼ぶことになる）。
-- 「やらないこと」の「二重アサーション拒否しか足さない」と、4節の「TS の unknown との違いは一つ」。
-- **新たに見つけたもの**：decode の節の止めるバグの例「id を数値から文字列に変えたとき `expected: "int64", actual: "string"` が返る」。Int64 は数字だけの文字列を受け付けるので、`"123"` は通る。失敗するのは UUID のような数字でない文字列のとき。
+- **Sync**: every event carries a server sequence number (seq). Events are applied only in seq order; early arrivals are held, and duplicates and old events are dropped. The app fetches a fresh snapshot and applies the newer held events when any of these happens: a gap isn't filled within `gapMs` (400ms), a heartbeat shows that the server is ahead, events were missed during a reconnection, or the server restarted (the epoch changed). If nothing arrives for `silenceMs` (3.5 seconds), the connection is considered dead even without a close.
+- **Only the stream writes to the store**: POST responses are not written to the store. Whichever arrives first, the response or the WS message, ordering is decided in one place.
+- **Resync fetches use `latest`**: even when reconnections overlap, an old snapshot never overwrites newer state. The code is written to stay within the `latest` guarantee (apply the result in the continuation right after await).
+- **When the data isn't live, the screen says the values are stale**: while disconnected, syncing, or silent, the table shows "values as of seq N" and is dimmed.
+- **The screen is notified once per frame**: the state is updated on every message, but notifications to React are batched with requestAnimationFrame. When the app rendered on every message, the main thread saturated at around 1,000 messages per second. WebSocket messages piled up in the page's event queue, and the time from sending to display kept growing, into seconds. The app's own "server seq − applied seq" doesn't count messages that haven't been delivered yet, so it can't see this lag (at first this led to a wrong conclusion that the app had caught up). For benchmarking, `?render=each` switches back to rendering on every message.
+- **A hook for using `latest` in React**: `useFork` holds one `f.fork()` per component and calls `cancel()` on unmount. It depends on React, so it is not part of the runtime.
 
-### その他
+### E2E and benchmark environment
 
-- Decimal の指数表記。Java の `BigDecimal.stripTrailingZeros().toString()` や Python の `Decimal` は `"1E+3"` を出すことがある。受け付けるなら、指数の大きさに上限を設けたうえで展開する。
-- 開発ビルドで `Intl.Segmenter` が無い環境では、コードポイント単位で分割している。
+- **Browsers come from nixpkgs**: the WebKit that Playwright downloads requires `libavif.so.16`, which Ubuntu 26.04 doesn't have. So `playwright-driver.browsers` from nixpkgs is used, and `@playwright/test` is pinned to its version (1.61.1). Outside NixOS, nix's libglvnd can't find the EGL driver and WPE WebKit doesn't start, so Mesa from nixpkgs is set as the EGL vendor (`sandbox/e2e/shell.nix`).
+- **The HTML is served with COOP/COEP**: with cross-origin isolation, the browser returns `performance.now()` at full precision. The latency measurements and microbenchmarks rely on this.
+- **Benchmark procedure**: after a warm-up, the cases are repeated with their order shuffled every round, and p50 / p95 / p99 are reported. Each sample is a batch that takes at least 10ms. Text is measured separately for hits and misses of the boundary cache (256 entries).
+- **Batch counts are extrapolated only from measurements that took at least 1ms**: Firefox adds jitter to `performance.now()`. Measurements of a few microseconds came out as almost 0, and the batches extrapolated from them were hundreds of times too large. A single sample took several seconds, and the Firefox benchmark ran for more than 30 minutes without finishing. Each scale-up is also capped at 10 times. In addition, results are saved part by part, and each browser has a time limit. When the page is blocked by synchronous work, an in-page `waitForFunction` doesn't even time out, so the waiting is done from the test side.
+- **Firefox is excluded from the speed benchmarks (but kept in E2E)**: Playwright's Firefox 151 runs WASM slowly. With the same page, the same WASM, and 20 Japanese characters, one grapheme boundary computation took 10.4µs in Playwright's Firefox 151, 10.4µs when the same binary was launched directly without Playwright, 1.9µs in Firefox 157 from Mozilla's official build (snap), and 1.5µs in Chromium 149 (for normalization: 9.6µs, 10.1µs, 2.1µs and 1.4µs). nixpkgs uses the prebuilt binaries that Playwright distributes as they are, so this is a property of Playwright's build, not of Nix, and running `npx playwright install firefox` on GitHub Actions installs the same build. These numbers don't represent users' Firefox, and no change on our side can fix them, so `run.ts` defaults to Chromium and WebKit (and Node); values measured with `--browsers firefox` are for reference only and are excluded from the budget checks. The behavior checks (the 93 E2E tests) still run on all 3 browsers. Gecko is the only different engine, so keeping it ensures a change to the runtime or core that breaks only Firefox doesn't go unnoticed.
+- **Budgets are ratios to baselines measured in the same run** (`sandbox/bench/budgets.json`): Zod, Intl, tsc, the TS version, and a build without the core. If the machine slows down, both sides slow down in the same way, so the budgets stay meaningful in CI. The only absolute value is the size of the core (gzipped bytes).
+
+### Fixes to packages found by the demonstration
+
+- **Parser: decode targets that start with a literal weren't recognized.** `decode "buy" | "sell" from v` was a syntax error. This record said "literal types can be written too", but the parser only looked for a name right after `decode`. An identifier followed on the same line by a string or number is always a syntax error in TS, so this form is now recognized as decode too. Template literals (`` decode`x` ``) are still excluded, because they are valid TS as tagged templates. This was found while trying to compare the result of `URLSearchParams.get("render")`. A value from a source can't even be compared with a string using `===` (TS2367), so you have to write `decode "frame" | "each" | null from ...`.
+- **Runtime: added `Decimal.add` / `sub` / `mul`.** They were needed for order amounts (price × quantity) and change from the previous day. Without arithmetic, the only option is converting to Number, which defeats the point of Decimal. Sums, differences and products can always be represented exactly, so they don't round. Division is not included, because the caller has to decide the number of digits and the rounding of the result (display ratios were computed with Number).
+- **Runtime: added `Text.status` (`"core" | "host" | "failed"`).** At startup, the app needs to know that the core failed to load so it can stop the screen (so that a CSP misconfiguration doesn't silently switch to the browser's ICU). This adds only one read-only value and doesn't touch the syntax.
+- **Runtime: made decode faster (by 20–26%).** None of these changes behavior.
+  - Object decoders: the field decoders, whether each field is optional, and the functions to run are put into arrays when the decoder is created. This stops the loop from reading properties of differently shaped decoder objects every time (the access had been megamorphic).
+  - Zoned: if the input is already in canonical form, it is returned as is, without being reassembled.
+  - Int64: strings of up to 18 digits skip the range check.
+  - Property tests confirm that the Zoned shortcut matches an independently built canonical form on inputs with varied notation (a lowercase t, omitted seconds, `,` as the decimal separator, `+00:00`).
+
+### Findings about the language
+
+- **A React + Vite frontend can be written in it.** It is about 1,500 lines, all in `.seam.ts` / `.seam.tsx`. `seamc check` passed from the start, and inserted violations were stopped with SEAM2001 / SEAM2101. All five additions were used (boundary, decode, latest, boundary types, and `Unknown` as a type annotation for passing fetch responses and WS frames around).
+- **JSON syntax errors are outside decode**: both `res.json()` and `JSON.parse` throw on malformed input. decode returns only shape errors as values, so the app has to use try/catch (`http.seam.ts`).
+- **On a WebSocket, go through `decode string from e.data`**: `e.data` is Unknown, so it can't be passed straight to `JSON.parse`. It is more work, but it distinguishes binary frames, and it did reject that fault in practice.
+- **Zod can't be used from inside `.seam.ts`**: the result of `JSON.parse` is Unknown, and passing Unknown to `safeParse(unknown)` is stopped by SEAM2001. To combine SeamScript with an existing validation library, you put that code in a separate plain `.ts` file (`cases-zod.ts` in bench).
+- **Form input can also be validated with decode**: `decode Int64 from input.value` validates a quantity with the same rules as network data. DOM input is not a source, but decode can still be used on it.
+- **Text determinism mattered on real data**: the Khmer "ស្ត្រី" is 1 character in Unicode 17 and 3 in Unicode 16. In the browsers' own ICU, Chromium 149 and Firefox 151 implement Unicode 17, while WebKit 26.5 and Node 24 implement 16 (on the official test data, WebKit gets 756/766 for graphemes and 19,872/20,034 for normalization). If the memo limit (32 characters) is checked with Intl.Segmenter, the same memo is rejected only in Safari and on the server. Counting with the core makes the 3 browsers and the server agree.
+- **The grapheme count alone can't limit the length of a memo**: 300 combining characters count as 1 character. The server also needed a byte limit (256 bytes).
+- **There was no API to tell "the core failed to load" from "development build" at startup**: both gave `Text.deterministic === false`, and the only way was to try some Text operation and catch `CoreUnavailableError`. → `Text.status` was added (previous section).
+
+## Speed improvement decisions
+
+### Text (`packages/core`, `packages/runtime/src/text.ts`)
+
+- **Data crosses the WASM boundary as UTF-16**: JS strings are UTF-16, so instead of `TextEncoder.encodeInto` and `TextDecoder`, strings are written into WASM memory with `charCodeAt`, and results are read back as UTF-16 too. For short strings, those two calls alone cost 1–2µs per call. The C ABI changed to `seam_input` / `seam_normalize` / `seam_grapheme_count` / `seam_graphemes(len, limit)`. Buffers are reused, and they are no longer allocated zero-filled (they grow only when a large input arrives).
+- **Normalization returns unchanged input as is, using the quick check (UAX #15)**: on the WASM side, if `is_nfc_quick` / `is_nfd_quick` returns YES, no output is built. Otherwise, if the result is the same as the input, WASM reports "unchanged", and the JS side returns the original string (without building a new one).
+- **Shortcuts that skip WASM (`js/tables.ts`)**: a table that holds three properties per code point is generated at build time from the Rust crates (`examples/tables.rs`, `src/props.rs`). The three properties are listed below; if every character in a string has the property, JS alone returns the answer.
+  - NFC-safe: canonical combining class 0 and NFC_Quick_Check=Yes. For a string made only of such characters, the quick check returns YES, so the string is already NFC (by the definition in UAX #15).
+  - NFD-safe: the same, for NFD.
+  - Solo: Grapheme_Cluster_Break is one of Other / LF / Control / LV / LVT (CR excluded). Between two such characters, every rule in UAX #29 always gives a boundary. GB9c (Indic conjuncts) and GB11 (emoji ZWJ sequences) require a Linker or a ZWJ right before the second character, and neither of those is solo, so Extended_Pictographic and InCB=Consonant characters also count as solo. The classification uses only the crate's public API: the crate's grapheme segmentation confirms that the character breaks on both sides of representative characters (`a`, LF, a control character, LV, LVT) and also breaks next to itself.
+  - The table is built from the crates themselves, so it has the same Unicode version as the WASM core. Rust tests check that the ranges are consistent across all code points, and that random strings match the actual normalization and segmentation. JS tests check that table lookups match the generator across all code points, and that a core with shortcuts and a core without them (`createCore(x, { shortcuts: false })`) give the same answers on strings mixed with fragile characters (combining characters, Hangul jamo, CR LF, ZWJ sequences, flags, variation selectors, Indic conjuncts, Khmer, characters outside the BMP, compatibility ideographs, lone surrogates). To confirm that the tests really catch errors, the shortcut implementation was deliberately broken (targeted tests were added for anything they missed).
+  - The tables are 1.7KB gzipped. The BMP needs a single lookup in a 64KB table; everything else uses a two-level table (36KB). Both are built on first use.
+- **Only the start of a long string is processed**: `Text.slice(t, a, e)` (a, e ≥ 0) and `Text.at(t, i)` (i ≥ 0) find only as many boundaries from the start as they need (`graphemeBoundaries(s, limit)`). Only a prefix of the string is passed to WASM. Whether position p is a boundary depends only on `s[..p]` and the one character at p (the UAX #29 rules look backward, and look ahead by only one character). So the boundaries found in a prefix match those of the whole string, except at the end of the prefix. If not enough boundaries are found, the length is doubled and the search runs again, never splitting a surrogate pair. Negative indexes need the total count, so they still compute all boundaries, as before (for long strings, this builds an array of boundaries).
+- **The `TextCore` interface changed**: `graphemeCount(s)` was added, and `graphemeBoundaries(s, limit?)` got a limit. `normalize` also takes care of replacing lone surrogates (so the runtime can skip `toWellFormed`; the development fallback does the replacement itself). `@seamscript/core` and `@seamscript/runtime` are meant to be used at the same version (peerDependency), so there is no compatibility layer.
+- **The cache lives on the JS side of the core, with a size limit**: a Map with 2 generations, each holding up to 128 entries or about 1 million code units. Large keys and values don't keep eating memory. Only answers that came from WASM, and long strings (256 code units or more, where a Map lookup is cheaper than a scan), are cached. The development fallback (the host's ICU) has no cache.
+- **WASM is built with `opt-level = 3`** (changed from `"s"`): it adds 425 bytes gzipped, but paths through WASM became 10–40% faster (`Text.nfc` on Khmer went from 2.25µs to 1.36µs).
+- **Big-endian environments are not supported**: WASM memory is little-endian, while typed arrays read in the host's byte order. On a big-endian host, `createCore` throws, and this is recorded as a load failure (Text throws `CoreUnavailableError`). This avoids silently returning wrong results. Every environment that runs a major browser is little-endian.
+
+### decode (`packages/runtime`)
+
+- Zoned and Decimal check with `charCodeAt` whether the input is in canonical form, and if it is, return it as is. Servers almost always send canonical form, so this skips the regular expressions and string building. Tests confirm that the answers match the regular-expression paths (`normalizeZonedByPattern` / `normalizeDecimalByPattern`) on 20,000 inputs each, made by applying character substitutions, insertions and deletions to valid values.
+
+### `seamc check` (`packages/compiler`, `packages/parser`)
+
+- **In the first program, only member accesses whose name is a source member (json, parse, getItem, get, getAll, data) are sent to the type checker**: previously every member access was resolved, so the first program alone paid for a large share of the type checking. The destructuring check also asks for a type only when the key is `data`.
+- **If there is nothing to wrap, the first program is used as the final program.**
+- **The two programs share SourceFiles**: the host returns the same object for the same file, so the second program doesn't parse or bind unchanged files (such as lib.dom.d.ts) again. Before, they were parsed from scratch every time.
+- **checkFlows asks for the types of fewer expressions**: the Text UTF-16 access check looks only at accesses with names such as `length` / `at` / `slice`, and at element accesses; for calls, the callee and the return value are inspected only when an argument contains Unknown; and expressions whose type is always primitive (literals, templates, `typeof`, `!x`, and so on) are skipped. Results per type are cached per program instead of per file.
+- **Faster startup**: like tsc, it uses Node's compile cache (`module.enableCompileCache`), and it loads the TypeScript API with `require` (importing it as ESM makes Node scan the whole 9MB for export names, which takes about 100ms).
+- **The build of the parser fork replaces `charCodes.x` with numbers**: this is the transform that upstream Babel applies at build time (babel-plugin-transform-charcodes). When bundled as is with esbuild, the innermost loop of the tokenizer called a getter on a CommonJS export every time. The transform became about 1.8 times faster. Also, the transform doesn't attach comments to the syntax tree (`attachComment: false`).
+- Result: the ratio to tsc on the same program went from 1.77 to 1.36 (the median of 8 alternating runs each). This doesn't reach the 1.2 target. The remaining overhead comes from the first run of our own parser (until the JIT warms up), checkFlows, the second program, and slower startup because the TypeScript API is larger than tsc itself.
+
+### Budgets (`sandbox/bench/budgets.json`)
+
+- They were tightened to match the improvements: decode ÷ Zod doing the same check 1.6 → 1.3, Text.length ÷ Intl 1.5 → 1.0, Text.nfc ÷ normalize 35 → 6, seamc check ÷ tsc 2.5 → 1.6.
+- **Only the limit on the gzipped bytes the core adds was raised, from 110,000 to 115,000**: the measured value is 111,155 (104,882 before the change). The extra 6KB or so comes from the shortcut tables (1.7KB), the WASM-side quick check (about 2KB), `opt-level = 3` (0.4KB), and the JS-side code. In exchange, Text operations became 10–100 times faster. Ways to make the WASM smaller were tried, but even binaryen's `wasm-opt -O3` saved only 1.6KB, which wasn't worth adding a tool. Most of the rest is the Unicode tables for normalization and grapheme segmentation, plus the overhead of embedding the WASM in JS as base64 (about 19KB). The base64 overhead would go away with a separate WASM file, but that needs configuration for each bundler, so it was avoided (see "WASM core decisions").
+
+### Benchmark procedure
+
+- During a benchmark, other apps use the CPU or the clock speed drops. When computing a ratio, the two things being compared are run alternately. Results record the load average at the start and at the end (`meta.loadAtStart` / `loadAtEnd`).
+- The full run on 2026-10-14 was done at a load average of 12–28. Only one budget item (WebKit send→DOM p95 at 50 messages per second) exceeded its limit of 1.5, at 1.52. The cause was that p50 jumped from 21ms to 55ms in just one SeamScript round (the browser itself was waiting for the CPU), so only the WebKit latency was measured again, and the result of 1.13–1.17 was adopted. The values from the full run are kept in results.json, and the top of RESULTS.md explains what happened.
+- The E2E test "disconnect and reconnect (just cutting TCP, every 0.7 seconds)" failed on WebKit and Firefox under high load. The test counts the reconnections within 4 seconds, and when the page's timers lag, the count falls short (the app's reconnection logic is correct). The test now keeps the fault going and waits up to 20 seconds for the count to be reached. It passed 12 times in a row under high load.
+- The root `yarn sandbox` and CI used `yarn workspace @seamscript-sandbox/app check`, which ran yarn's built-in `check` (an integrity check of node_modules) instead of the app's `check` script (`seamc check`). This is fixed to `run check`.
+
+## Editor support decisions (`packages/ts-plugin`, `packages/vscode`)
+
+- **A tsserver plugin (using Volar)**: `@seamscript/ts-plugin` shows tsserver each `.seam.ts` as the output of `seamc` (plain TS), and leaves position mapping to Volar (`createLanguageServicePlugin` from `@volar/typescript` 2.4.28). Completion, hover types, go to definition, references, rename and TS type errors work as the regular TS features, because Volar maps the positions for each language service feature through the mapping. Compared with running a separate language server (LSP), this doesn't duplicate VS Code's TS features, and other editors that use tsserver (such as Neovim) can use it just by adding it to `plugins` in `tsconfig.json`.
+- **Mappings**: the transform splices edits into the original text, so the ranges of the output that repeat the original text verbatim are found from a hires source map (`identityRanges` in `@seamscript/compiler/mappings`) and mapped with all features enabled. Names inside rewritten parts that refer to the same thing (a boundary's name and the name of its decoder constant; a boundary name written as decode's type and that name inside the decoder expression; a latest function's name and the name of the wrapper function) are returned by the transform as `links`, and mapped with only hover, navigation, rename and completion enabled (errors in generated code are not reported). This lets you jump from `Order` in `Order.encode(...)` or `decode Order from v` to the boundary declaration, and renaming reaches decode's type too.
+- **The virtual code is preceded by whitespace with the same line layout as the original file (Volar's default)**: tsserver converts definition and reference positions into lines and columns using the language service's text (the virtual code) (`toLineColumnOffset`). With the whitespace in place, the original offsets turn into the correct lines and columns. At first `preventLeadingOffset` left out the whitespace, so go to definition used virtual-code coordinates (the tests caught this).
+- **The source wrapping (two passes) runs on the language service's program until it settles**: the virtual code is built from the wrap positions remembered for each file. Each time diagnostics are requested, findSources runs on the language service's program to find where wrapping is needed; if the result differs from the remembered positions, the new positions are remembered, the file version is bumped, and diagnostics are requested again. The program after wrapping finds the same positions, so one retry settles it. This uses less memory and time than keeping a separate helper language service. To force the virtual code to be rebuilt, the plugin sets `isAssociationDirty` on the Volar script, marks the file version (`getScriptVersion`), and advances the project version with `ScriptInfo.markContainingProjectsAsDirty()` (tsserver's language service doesn't look at file versions unless the project version changes). When an edit shifts the text, the remembered positions shift by the same amount (wraps that overlap the edit are dropped and computed again on the next diagnostics request).
+- **When the syntax breaks partway through typing**: the parser fork stops on broken syntax. In that case, the current edit (a single region, found from the common prefix and suffix of the original text) is applied to the last virtual code that transformed successfully. The edit can be applied if it falls within a range that repeats the original text verbatim, and since TS parsing copes well with broken syntax, completion and hover types keep working. For syntax errors, the ones TS reports are shown; when TS reports nothing (as with a redeclaration of the same name, which Babel treats as a syntax error but TS sees only as a type error), SEAM1000 is shown. For a file that has never transformed successfully, the original text is shown as is and only SEAM1000 is reported, without TS's errors on SeamScript syntax (there would be a great many).
+- **The checker runs on the TypeScript it is given (`createChecker(ts)`)**: in an editor, tsserver's TypeScript version can differ from the version pinned by `@seamscript/compiler` (5.9.3), and numeric values such as SyntaxKind change between versions, so the plugin never mixes in a TypeScript of its own. The plugin doesn't bundle TypeScript; it bundles the compiler's transform and checker, the parser, and Volar into one CommonJS file (about 1MB).
+- **The VS Code extension is declarations only**: `contributes.typescriptServerPlugins` loads the plugin, and a TextMate injection grammar highlights `boundary`, `decode … from` and `latest`. The extension has no code. The `.vsix` includes `node_modules/@seamscript/ts-plugin` (VS Code looks for the plugin in the extension's directory). `yarn workspace seamscript build` produces `packages/vscode/dist/seamscript-0.0.0.vsix`.
+- **How it is verified**: tests start the same tsserver that VS Code uses and drive it over its protocol (`packages/ts-plugin/test`), covering diagnostics, hover, completion, definition, references, rename, broken syntax partway through typing, syntax errors that exist only in SeamScript, and files that have never transformed successfully. On the sandbox app (15 files), plain tsserver reports errors in 14 files (151 syntax errors, 366 type errors), and with the plugin there are 0. The extension is checked the same way, with only the packaged contents as the lookup path (`packages/vscode/test/extension.test.ts`), and the grammar is checked with VS Code's tokenizer (vscode-textmate) and VS Code's TypeScript grammar. There are no tests that launch VS Code itself.
+- **License**: an MIT LICENSE is at the root. The copyright holder is "SeamScript contributors" (no holder was written down anywhere; this can be changed). The parser fork keeps Babel's LICENSE.
+
+## Decisions on missing features
+
+- **Added `Decimal.div(a, b, digits, rounding)`**: a quotient usually isn't a finite decimal, so the caller decides how many decimal places to keep and how to round. The rounding modes have the same 9 names and meanings as `roundingMode` in `Intl.NumberFormat` (`ceil`, `floor`, `expand`, `trunc`, `halfCeil`, `halfFloor`, `halfExpand`, `halfTrunc`, `halfEven`), and the default is `halfExpand`, the same as `toFixed`. The division is done with BigInt and rounds once from the true value (errors don't accumulate). Dividing by 0 throws RangeError. `Decimal.round(d, digits, rounding)` was added at the same time, and `toFixed` also got a rounding argument. Rounding is verified by comparing it with `Intl.NumberFormat` (which accepts exact decimal strings) in every mode. For division, the expansion of the quotient is computed to 40 extra digits; if it doesn't divide evenly, a 1 is appended, and the result is rounded with `Intl.NumberFormat` for comparison (the trailing 1 keeps a value just above one half from being mistaken for exactly one half).
+- **`seamc check --watch` / `seamc build --watch`**: they detect changed files and check again (changes within 100ms are batched). Files whose text hasn't changed are not parsed or transformed again (`createSeamCache()`). Type checking runs on the whole program every time (there is no mechanism, like the one in tsc's `--watch`, that checks only the affected files again). They watch the directory of tsconfig.json and the wildcard directories in `include` (excluding `node_modules`, `.git` and the output directory). When the configuration changes, the cache is discarded. On the sandbox app, the first check took about 2.7 seconds, and later checks about 1.3 seconds.
+- **Bundlers other than Vite**: unplugin (3.4.0) adds support for esbuild, Rollup, Rolldown, webpack, Rspack, Rsbuild and Bun (`@seamscript/compiler/unplugin`). It does the same job as the Vite plugin: it converts `.seam.ts` into TS and then hands it to the bundler (or to the project's TS loader). The WASM core is included by default (these bundlers have no separate dev server mode; `core: false` removes it). The output for Vite includes it only on `vite build`, like the Vite plugin. Tests bundle the same project with esbuild, Rolldown, Rollup and webpack, run the output in Node, and confirm that decode and the WASM core work (Rollup and webpack can't read TS, so the tests add a loader that strips the types with esbuild).
+
+## Open questions
+
+### From the demonstration
+
+- **Editor support**: built (see "Editor support decisions").
+- Decimal division: added (see "Decisions on missing features").
+- **Text performance**: the weaknesses the benchmarks found (`Text.nfc` 11–36 times slower than native, `Text.slice(t, 0, n)` on 10KB 14–36 times slower than Intl, and slowness in Firefox) were fixed (see "Speed improvement decisions"). What remains is that `Text.nfc` on input containing characters that NFC can change (Khmer, Latin with combining characters, and so on) takes 2.3–4.7 times as long as native. A JS-side quick check that also looks at combining classes would narrow the gap, but the table would grow (not started).
+
+### Known limitations of the compiler
+
+- The first program is built only to find sources. Checking takes 1.36 times as long as plain tsc (see "Speed improvement decisions").
+- `any` coming from existing `.ts` files is not checked (the specification's "boundaries in existing code can't be protected").
+
+### Wording in the specification
+
+- The one-line definition, "every valid TypeScript program is a valid SeamScript program", contradicts the revised principle 1.
+- `seamscript/runtime` still appears in three places (principle 2, compilation step 2, and the import statement for fetch).
+- "DOM input" in principle 3 and `HTMLInputElement.value` in step 3(a) contradict section 4.
+- The milestone item about claiming names doesn't include the `@seamscript` scope.
+- With Text, bug 2 of the comparison demo is stopped at compile time (`t.slice` ends up calling `never`).
+- In the non-goals, "it only adds the rejection of double assertions", versus section 4's "there is only one difference from TS's unknown".
+- **Newly found**: the example, in the decode section, of a bug that decode stops: "when id changes from a number to a string, decode returns `expected: "int64", actual: "string"`". Int64 accepts strings made only of digits, so `"123"` passes. Decoding fails only for strings that aren't numbers, such as UUIDs.
+
+### Other
+
+- Exponent notation in Decimal. Java's `BigDecimal.stripTrailingZeros().toString()` and Python's `Decimal` can output `"1E+3"`. If it is accepted, it should be expanded with an upper limit on the size of the exponent.
+- In development builds on environments without `Intl.Segmenter`, segmentation is per code point.
