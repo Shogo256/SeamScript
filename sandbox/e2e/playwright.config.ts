@@ -11,7 +11,8 @@ export default defineConfig({
   // scenarios should not compete with more than two other browsers for the CPU.
   workers: 3,
   retries: 0,
-  reporter: [["list"], ["json", { outputFile: "results/report.json" }]],
+  // On GitHub Actions, failures also become annotations, readable without the job log.
+  reporter: [["list"], ...(process.env["GITHUB_ACTIONS"] ? [["github"] as const] : []), ["json", { outputFile: "results/report.json" }]],
   outputDir: "results/artifacts",
   use: { trace: "retain-on-failure" },
   projects: [

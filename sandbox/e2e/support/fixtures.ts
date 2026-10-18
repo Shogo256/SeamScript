@@ -100,14 +100,16 @@ export class App {
     const expected = expectedDigest(await this.backend.state());
     await expect.poll(() => this.digest(), { timeout, intervals: [100, 200, 500] }).toEqual(expected);
     await this.live();
-    const instruments = await this.page.$$eval("[data-testid=instrument-row]", (rows) =>
-      rows.map((r) => [(r as HTMLElement).dataset["id"], (r as HTMLElement).dataset["last"], (r as HTMLElement).dataset["version"]]),
-    );
-    expect(instruments).toEqual(expected.instruments.map(([id, last, version]) => [id, last, version]));
-    const orders = await this.page.$$eval("[data-testid=order-row]", (rows) =>
-      rows.map((r) => [(r as HTMLElement).dataset["id"], (r as HTMLElement).dataset["status"], (r as HTMLElement).dataset["filled"], (r as HTMLElement).dataset["version"]]),
-    );
-    expect(orders).toEqual(expected.orders.slice(0, 200).map(([id, status, filled, version]) => [id, status, filled, version]));
+    // The app notifies the UI once per frame, so the screen can trail the state
+    // it was just compared on by a frame or more on a slow machine: poll it too.
+    const rows = (selector: string, keys: string[]) =>
+      this.page.$$eval(selector, (els, keys) => els.map((e) => keys.map((k) => (e as HTMLElement).dataset[k])), keys);
+    await expect
+      .poll(() => rows("[data-testid=instrument-row]", ["id", "last", "version"]), { timeout: 5_000 })
+      .toEqual(expected.instruments.map(([id, last, version]) => [id, last, version]));
+    await expect
+      .poll(() => rows("[data-testid=order-row]", ["id", "status", "filled", "version"]), { timeout: 5_000 })
+      .toEqual(expected.orders.slice(0, 200).map(([id, status, filled, version]) => [id, status, filled, version]));
     const m = await this.monitor();
     expect(m.violations, "something on screen went back to an older version").toEqual([]);
     return expected;
