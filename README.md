@@ -1,5 +1,14 @@
 # SeamScript
 
+```text
+   _____                     _____           _       __
+  / ___/___  ____ _____ ___ / ___/__________(_)___  / /_
+  \__ \/ _ \/ __ `/ __ `__ \\__ \/ ___/ ___/ / __ \/ __/
+ ___/ /  __/ /_/ / / / / / /__/ / /__/ /  / / /_/ / /_
+/____/\___/\__,_/_/ /_/ /_/____/\___/_/  /_/ .___/\__/
+- - - - - - - - - - - - - - - - - - - - - /_/ - - - - -
+```
+
 SeamScript is a strict superset of TypeScript where data from outside your program can't be used until it's checked. Files use the `.seam.ts` / `.seam.tsx` extensions, and the compiler, `seamc`, outputs plain, human-readable TypeScript.
 
 Data from outside (`res.json()`, `JSON.parse`, `localStorage.getItem`, `URLSearchParams.get`, `MessageEvent.data`) has the type `Unknown`, and you can't use it until you check it with `decode`. IDs above 2^53, money amounts, time zone offsets, and the way "one character" is counted each cross the boundary in a dedicated type. With `latest`, an old response can no longer overwrite a newer screen.

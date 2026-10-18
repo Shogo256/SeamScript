@@ -8,14 +8,16 @@ The SeamScript compiler. It converts `.seam.ts` / `.seam.tsx` into plain TypeScr
 seamc check [-p tsconfig.json] [-w] [files...]
 seamc build [-p tsconfig.json] --outDir <dir> [--production] [-w]
 seamc transform <file.seam.ts>
+seamc --help | --version
 ```
 
 - `check`: type-checks the project. Use it instead of `tsc --noEmit`. Exits with code 1 if there are errors.
 - `build`: if checking passes, writes each `.seam.ts` to `--outDir` as plain TypeScript. File names don't change, so `import "./order.seam"` still resolves. With `--production`, each file imports `@seamscript/core` (the WASM core).
 - `transform`: prints the output for one file.
 - `-w` / `--watch`: checks again whenever a file or tsconfig.json changes. Files whose text hasn't changed are not parsed or transformed again.
+- `--help` (also `seamc` on its own) and `--version`: in a terminal they start with the SeamScript logo; piped or in CI they print plain text only.
 
-Checking runs in two passes. The first pass finds the sources of outside data (`res.json()`, `JSON.parse` and so on, identified by their declarations in TypeScript's lib), and the second pass type-checks them as `Unknown`. It takes about 1.4 times as long as tsc on the same program.
+Checking runs in two passes. The first pass finds the sources of outside data (`res.json()`, `JSON.parse` and so on, identified by their declarations in TypeScript's lib), and the second pass type-checks them as `Unknown`. It takes about 1.2 to 1.4 times as long as tsc on the same program.
 
 ## Diagnostics
 

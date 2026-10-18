@@ -15,13 +15,42 @@ const USAGE = `Usage:
                                                  --production also imports @seamscript/core (WASM)
   seamc transform <file.seam.ts>                 Print the plain TypeScript for one file
 
-  -w, --watch   Check again (and build) whenever a source file or tsconfig.json changes`;
+  -w, --watch   Check again (and build) whenever a source file or tsconfig.json changes
+  -h, --help    Show this help
+  -v, --version Show the version`;
+
+// The line under the name is a seam: stitches, with the "p" hanging through it.
+const LOGO = [
+  "   _____                     _____           _       __",
+  "  / ___/___  ____ _____ ___ / ___/__________(_)___  / /_",
+  "  \\__ \\/ _ \\/ __ `/ __ `__ \\\\__ \\/ ___/ ___/ / __ \\/ __/",
+  " ___/ /  __/ /_/ / / / / / /__/ / /__/ /  / / /_/ / /_",
+  "/____/\\___/\\__,_/_/ /_/ /_/____/\\___/_/  /_/ .___/\\__/",
+  "- - - - - - - - - - - - - - - - - - - - - /_/ - - - - -",
+].join("\n");
+
+function version(): string {
+  const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
+  return `seamc ${pkg.version} (TypeScript ${ts.version})`;
+}
+
+/**
+ * What `--help` and `--version` print. The logo only goes to a terminal, so
+ * scripts that read the version and CI logs get plain text.
+ */
+export function about(what: "help" | "version", terminal: boolean): string {
+  const head = terminal ? `${LOGO}\n\n` : "";
+  if (what === "version") return `${head}${version()}`;
+  return `${head}${version()}\nTypeScript where data from outside your program can't be used until it's checked.\n\n${USAGE}`;
+}
 
 type Args = { command: string; project?: string; outDir?: string; production?: boolean; watch?: boolean; files: string[] };
 
 function parseArgs(argv: string[]): Args | string {
   const [command, ...rest] = argv;
-  if (!command || !["check", "build", "transform"].includes(command)) return USAGE;
+  if (command === undefined || ["help", "-h", "--help"].includes(command)) return { command: "help", files: [] };
+  if (["version", "-v", "--version"].includes(command)) return { command: "version", files: [] };
+  if (!["check", "build", "transform"].includes(command)) return `Unknown command ${command}\n\n${USAGE}`;
   const args: Args = { command, files: [] };
   for (let i = 0; i < rest.length; i++) {
     const a = rest[i]!;
@@ -148,6 +177,11 @@ export function main(argv: string[]): number {
   if (typeof args === "string") {
     console.error(args);
     return 2;
+  }
+
+  if (args.command === "help" || args.command === "version") {
+    console.log(about(args.command, process.stdout.isTTY === true));
+    return 0;
   }
 
   if (args.command === "transform") {
