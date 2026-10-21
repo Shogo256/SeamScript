@@ -4,15 +4,18 @@ import { dirname, join, relative, resolve } from "node:path";
 // Loaded with require: importing TypeScript's CommonJS API as ESM makes Node
 // scan all of it for export names first, about 100 ms on every run.
 import ts = require("typescript");
+import { readSeamConfig, type SeamConfig } from "./config.js";
 import { type Diagnostic, formatDiagnostic } from "./diagnostics.js";
 import { createSeamCache, createSeamProgram, defaultCompilerOptions, type SeamCache } from "./program.js";
 import { isSeamFile, transform } from "./transform.js";
 
 const USAGE = `Usage:
   seamc check [-p tsconfig.json] [-w] [files...]  Type-check, including SeamScript's boundary rules
-  seamc build [-p tsconfig.json] --outDir <dir> [--production] [-w]
+  seamc build [-p tsconfig.json] --outDir <dir> [--production [--defer-core]] [-w]
                                                  Check, then write each .seam.ts as plain TypeScript;
                                                  --production also imports @seamscript/core (WASM)
+                                                 into the files that use Text; --defer-core loads it
+                                                 without holding up start-up (await Text.ready)
   seamc transform <file.seam.ts>                 Print the plain TypeScript for one file
 
   -w, --watch   Check again (and build) whenever a source file or tsconfig.json changes
@@ -44,7 +47,7 @@ export function about(what: "help" | "version", terminal: boolean): string {
   return `${head}${version()}\nTypeScript where data from outside your program can't be used until it's checked.\n\n${USAGE}`;
 }
 
-type Args = { command: string; project?: string; outDir?: string; production?: boolean; watch?: boolean; files: string[] };
+type Args = { command: string; project?: string; outDir?: string; production?: boolean; deferCore?: boolean; watch?: boolean; files: string[] };
 
 function parseArgs(argv: string[]): Args | string {
   const [command, ...rest] = argv;
@@ -57,11 +60,13 @@ function parseArgs(argv: string[]): Args | string {
     if (a === "-p" || a === "--project") args.project = rest[++i];
     else if (a === "--outDir") args.outDir = rest[++i];
     else if (a === "--production") args.production = true;
+    else if (a === "--defer-core") args.deferCore = true;
     else if ((a === "-w" || a === "--watch") && command !== "transform") args.watch = true;
     else if (a.startsWith("-")) return `Unknown option ${a}\n\n${USAGE}`;
     else args.files.push(a);
   }
   if (args.command === "build" && !args.outDir) return `build needs --outDir\n\n${USAGE}`;
+  if (args.deferCore && !args.production) return `--defer-core goes with --production\n\n${USAGE}`;
   if (args.command === "transform" && args.files.length !== 1) return `transform takes one file\n\n${USAGE}`;
   return args;
 }
@@ -69,6 +74,7 @@ function parseArgs(argv: string[]): Args | string {
 interface Project {
   rootNames: string[];
   options: ts.CompilerOptions;
+  seam: SeamConfig;
   configErrors: readonly ts.Diagnostic[];
   /** What a watch watches: the directories the project's files come from, and the config file's. */
   directories: string[];
@@ -83,18 +89,21 @@ function loadProject(args: Args): Project {
       : undefined;
   const fileDirs = args.files.map((f) => dirname(resolve(f)));
   if (configPath === undefined) {
-    return { rootNames: args.files.map((f) => resolve(f)), options: defaultCompilerOptions, configErrors: [], directories: fileDirs };
+    return { rootNames: args.files.map((f) => resolve(f)), options: defaultCompilerOptions, seam: {}, configErrors: [], directories: fileDirs };
   }
   const configErrors: ts.Diagnostic[] = [];
   const parsed = ts.getParsedCommandLineOfConfigFile(configPath, {}, {
     ...ts.sys,
     onUnRecoverableConfigFileDiagnostic: (d) => configErrors.push(d),
   });
-  if (parsed === undefined) return { rootNames: [], options: {}, configErrors, directories: [dirname(configPath)] };
+  if (parsed === undefined) return { rootNames: [], options: {}, seam: {}, configErrors, directories: [dirname(configPath)] };
+  const seam = readSeamConfig((parsed.raw as { seamscript?: unknown } | undefined)?.seamscript);
+  const seamErrors = seam.errors.map((messageText): ts.Diagnostic => ({ category: ts.DiagnosticCategory.Error, code: 0, file: undefined, start: undefined, length: undefined, messageText: `${configPath}: ${messageText}` }));
   return {
     rootNames: args.files.length > 0 ? args.files.map((f) => resolve(f)) : parsed.fileNames,
     options: parsed.options,
-    configErrors: [...configErrors, ...parsed.errors],
+    seam: seam.config,
+    configErrors: [...configErrors, ...parsed.errors, ...seamErrors],
     directories: [dirname(configPath), ...Object.keys(parsed.wildcardDirectories ?? {}), ...fileDirs],
   };
 }
@@ -114,7 +123,7 @@ function run(args: Args, project: Project, cache?: SeamCache): number {
     console.error(ts.formatDiagnostics(configErrors, { getCanonicalFileName: (f) => f, getCurrentDirectory: () => process.cwd(), getNewLine: () => "\n" }));
     return -1;
   }
-  const p = createSeamProgram(rootNames, options, undefined, { production: args.production, cache });
+  const p = createSeamProgram(rootNames, options, undefined, { production: args.production, deferCore: args.deferCore, cache, checker: project.seam });
   const diagnostics = p.diagnostics();
   print(diagnostics);
   const errors = diagnostics.filter((d) => d.category === "error").length;
@@ -147,7 +156,10 @@ function watchProject(args: Args): number {
     const started = performance.now();
     console.error(`[${time()}] ${reason}`);
     const project = loadProject(args);
-    const optionsKey = JSON.stringify(project.options);
+    // Watch before checking: a file saved while the check runs is then checked
+    // again right after it, instead of being missed.
+    for (const dir of project.directories) if (!watched.has(dir)) listen(dir);
+    const optionsKey = JSON.stringify([project.options, project.seam]);
     if (optionsKey !== lastOptions) {
       cache = createSeamCache();
       lastOptions = optionsKey;
@@ -155,7 +167,6 @@ function watchProject(args: Args): number {
     const errors = run(args, project, cache);
     const result = errors < 0 ? "The configuration has errors" : `Found ${plural(errors)}`;
     console.error(`[${time()}] ${result} (${Math.round(performance.now() - started)} ms). Watching for file changes.`);
-    for (const dir of project.directories) if (!watched.has(dir)) listen(dir);
   };
 
   const listen = (dir: string) => {

@@ -13,6 +13,7 @@
 // again and the check repeated. The wrapped program finds the same sites, so this
 // settles after one round.
 import { createChecker, type Finding } from "@seamscript/compiler/checker";
+import { readSeamConfig } from "@seamscript/compiler/config";
 import { isSeamFile, RUNTIME_MODULE, type UnknownWrap } from "@seamscript/compiler/transform";
 import type { Language, LanguagePlugin } from "@volar/language-core";
 import type {} from "@volar/typescript";
@@ -21,7 +22,12 @@ import type * as ts from "typescript";
 import { createSeamCode, diff, type SeamCode, shiftWraps, toSource, toSourceExact } from "./code.js";
 
 const plugin = createLanguageServicePlugin((tsModule, info) => {
-  const checker = createChecker(tsModule);
+  // The project's "seamscript" settings in tsconfig.json, read when tsserver loads
+  // the plugin (seamc check reports mistakes in them).
+  const project = info.project as ts.server.Project & { getConfigFilePath?: () => string };
+  const configPath = project.getConfigFilePath?.();
+  const raw = configPath === undefined ? undefined : (tsModule.readConfigFile(configPath, tsModule.sys.readFile).config as { seamscript?: unknown } | undefined);
+  const checker = createChecker(tsModule, readSeamConfig(raw?.seamscript).config);
   // Volar replaces info.languageService with a proxy that maps positions; this
   // one works on the virtual code, which is what the checker pass needs.
   const service = info.languageService;
@@ -91,10 +97,23 @@ const plugin = createLanguageServicePlugin((tsModule, info) => {
           });
       };
 
+      /** Quick fixes of the last check, per file, in source positions. */
+      const fixes = new Map<string, { start: number; end: number; code: number; fix: { description: string; changes: ts.TextChange[] } }[]>();
+
       const fromFinding = (code: SeamCode, file: ts.SourceFile | undefined, f: Finding) => {
         const start = toSource(code, f.pos);
         const end = toSource(code, Math.max(f.pos, f.end - 1)) + 1;
-        return diagnostic(file, start, end - start, f.code, f.message);
+        const d = diagnostic(file, start, end - start, f.code, f.message);
+        if (f.fix !== undefined) {
+          // Every edit must land in text kept from the source, or the fix is not offered.
+          const changes = f.fix.edits.map((e) => {
+            const from = toSourceExact(code, e.pos);
+            const to = e.end > e.pos ? toSourceExact(code, e.end - 1) : from;
+            return from === undefined || to === undefined ? undefined : { span: { start: from, length: e.end > e.pos ? to + 1 - from : 0 }, newText: e.text };
+          });
+          if (changes.every((c) => c !== undefined)) fixes.get(code.fileName)?.push({ start, end, code: d.code, fix: { description: f.fix.description, changes } });
+        }
+        return d;
       };
 
       const runtimeOf = (fileName: string) =>
@@ -133,12 +152,15 @@ const plugin = createLanguageServicePlugin((tsModule, info) => {
           info.project.getScriptInfo(fileName)?.markContainingProjectsAsDirty();
           return semantic(fileName, round + 1);
         }
+        fixes.set(fileName, []);
         return [
           ...base,
           ...fromTransform(code, file, false),
-          ...[...findings, ...checker.checkFlows(program, file, runtimeOf(fileName))].map((f) =>
-            fromFinding(code, file, { ...f, pos: f.pos - lead, end: f.end - lead }),
-          ),
+          ...[...findings, ...checker.checkFlows(program, file, runtimeOf(fileName))].flatMap((f) => {
+            const shifted = { ...f, pos: f.pos - lead, end: f.end - lead, ...(f.fix ? { fix: { ...f.fix, edits: f.fix.edits.map((e) => ({ ...e, pos: e.pos - lead, end: e.end - lead })) } } : {}) };
+            const d = fromFinding(code, file, shifted);
+            return f.fixOnly ? [] : [d];
+          }),
         ];
       }
 
@@ -155,10 +177,28 @@ const plugin = createLanguageServicePlugin((tsModule, info) => {
         return base;
       }
 
+      // TypeScript's errors for Unknown assigned to a typed variable carry the decode
+      // fix: TS2322, or TS2739/2740/2741 when the type is an object (a boundary).
+      const ASSIGNMENT = [2322, 2739, 2740, 2741];
+      const FIXABLE = ["2001", "2005", "2101", "2201", "1402", ...ASSIGNMENT.map(String)];
+      const matches = (code: number, errorCodes: readonly number[]) =>
+        errorCodes.includes(code) || (code === 2322 && errorCodes.some((c) => ASSIGNMENT.includes(c)));
+
+      function codeFixes(fileName: string, start: number, end: number, errorCodes: readonly number[], ...rest: unknown[]): readonly ts.CodeFixAction[] {
+        const base = (proxy.getCodeFixesAtPosition as (...a: unknown[]) => readonly ts.CodeFixAction[])(fileName, start, end, errorCodes, ...rest);
+        const ours = (fixes.get(fileName) ?? [])
+          .filter((f) => matches(f.code, errorCodes) && f.start <= end && start <= f.end)
+          .map((f): ts.CodeFixAction => ({ fixName: "seamscript", description: f.fix.description, changes: [{ fileName, textChanges: f.fix.changes }] }));
+        return [...ours, ...base];
+      }
+
       info.languageService = new Proxy(proxy, {
         get(target, key) {
           if (key === "getSemanticDiagnostics") return (fileName: string) => semantic(fileName);
           if (key === "getSyntacticDiagnostics") return syntactic;
+          if (key === "getCodeFixesAtPosition") return codeFixes;
+          // An editor asks for fixes only for the codes listed here.
+          if (key === "getSupportedCodeFixes") return (fileName?: string) => [...proxy.getSupportedCodeFixes(fileName), ...FIXABLE];
           const value = Reflect.get(target, key);
           return typeof value === "function" ? value.bind(target) : value;
         },

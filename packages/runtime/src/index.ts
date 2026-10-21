@@ -3,10 +3,11 @@ export { Unknown, __unknown, __unknownAsync } from "./unknown.js";
 export { Int64 } from "./int64.js";
 export { Decimal, type Rounding } from "./decimal.js";
 export { Zoned } from "./zoned.js";
-export { Text, type TextForm, type TextStatus, type TextCore, CoreUnavailableError, __installCore, __coreFailed } from "./text.js";
+export { Text, type TextForm, type TextStatus, type TextCore, CoreUnavailableError, __installCore, __coreFailed, __coreLoading } from "./text.js";
 export {
   __b,
   __decode,
+  __decodeJson,
   MAX_DEPTH,
   EncodeRangeError,
   type Decoder,

@@ -21,6 +21,7 @@ export const Codes = {
   boundaryUnionMember: "SEAM1104",
   boundaryDiscriminant: "SEAM1105",
   notABoundary: "SEAM1106",
+  boundaryConstraint: "SEAM1107",
   decodeTarget: "SEAM1201",
   textForm: "SEAM1301",
   latestShape: "SEAM1401",
@@ -29,6 +30,7 @@ export const Codes = {
   unknownLaunder: "SEAM2002",
   sourceReference: "SEAM2003",
   sourceDestructure: "SEAM2004",
+  externalAny: "SEAM2005",
   textCodeUnits: "SEAM2101",
   stringifyBigint: "SEAM2201",
 } as const;

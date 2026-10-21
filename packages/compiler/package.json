@@ -40,6 +40,10 @@
     "./unplugin": {
       "types": "./dist/unplugin.d.ts",
       "default": "./dist/unplugin.js"
+    },
+    "./config": {
+      "types": "./dist/config.d.ts",
+      "default": "./dist/config.js"
     }
   },
   "files": [

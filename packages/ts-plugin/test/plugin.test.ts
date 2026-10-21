@@ -151,3 +151,79 @@ describe("editing", () => {
     expect(await semantic(file)).toEqual([]);
   });
 });
+
+describe("quick fixes", () => {
+  interface Protocol {
+    description: string;
+    changes: { fileName: string; textChanges: { start: Position; end: Position; newText: string }[] }[];
+  }
+
+  /** Applies a fix's edits (1-based line/offset) to `text`, last first. */
+  function apply(text: string, fix: Protocol): string {
+    const lines = text.split("\n");
+    const offset = (p: Position) => lines.slice(0, p.line - 1).reduce((n, l) => n + l.length + 1, 0) + p.offset - 1;
+    const edits = fix.changes.flatMap((c) => c.textChanges).sort((a, b) => offset(b.start) - offset(a.start));
+    for (const e of edits) text = text.slice(0, offset(e.start)) + e.newText + text.slice(offset(e.end));
+    return text;
+  }
+
+  /** The SeamScript diagnostics of `file` with their fixes, in reported order. */
+  async function fixesOf(file: string) {
+    // In source order (TypeScript's own errors come first otherwise), so fixes can be applied from the end.
+    const ds = (await semantic(file))
+      .filter((d) => d.source === "seamscript" || [2322, 2739, 2740, 2741].includes(d.code))
+      .sort((a, b) => a.start.line - b.start.line || a.start.offset - b.start.offset);
+    return Promise.all(
+      ds.map(async (d) => {
+        const all = await server.request<Protocol[]>("getCodeFixes", { file, startLine: d.start.line, startOffset: d.start.offset, endLine: d.end.line, endOffset: d.end.offset, errorCodes: [d.code] });
+        return { code: d.source === "seamscript" ? `SEAM${d.code}` : "TS-assignment", fixes: all.filter((f) => f.changes.length > 0 && !f.description.startsWith("Add ")) };
+      }),
+    );
+  }
+
+  it("lists SeamScript's fixable codes as supported", async () => {
+    const supported = await server.request<string[]>("getSupportedCodeFixes", { file: use });
+    expect(supported).toEqual(expect.arrayContaining(["2001", "2101", "2201"]));
+  });
+
+  it("offers a fix for each mechanical case, and the fixed file checks clean", async () => {
+    const text = [
+      'import { Order } from "./api.seam";',
+      "export function f(o: Order, orders: Order[], text: string) {",
+      "  const memo = o.memo;",
+      "  const n = memo.length;",
+      "  const first = memo[0];",
+      "  const body = JSON.stringify(o) + JSON.stringify(orders);",
+      "  const saved: Order = JSON.parse(text);",
+      "  return [n, first, body, saved];",
+      "}",
+      "",
+    ].join("\n");
+    const file = await openNew("fixes.seam.ts", text);
+    const found = await fixesOf(file);
+    expect(found.map((f) => [f.code, f.fixes.map((x) => x.description)])).toEqual([
+      ["SEAM2101", ["Use Text.length(memo)"]],
+      ["SEAM2101", ["Use Text.at(memo, 0)"]],
+      ["SEAM2201", ["Encode with Order.encode"]],
+      ["SEAM2201", ["Encode with Order.encode"]],
+      ["TS-assignment", ["Decode as Order (saved becomes a Result to check)"]],
+    ]);
+    let fixed = text;
+    // Applied one at a time from the end, so earlier positions stay valid.
+    for (const f of [...found].reverse()) fixed = apply(fixed, f.fixes[0]!);
+    expect(fixed).toContain("const n = Text.length(memo);");
+    expect(fixed).toContain("const first = Text.at(memo, 0);");
+    expect(fixed).toContain("JSON.stringify(Order.encode(o)) + JSON.stringify(orders.map(Order.encode))");
+    expect(fixed).toContain("const saved = decode Order from JSON.parse(text);");
+    await server.change(file, { line: 1, offset: 1 }, { line: text.split("\n").length, offset: 1 }, fixed);
+    expect(codes(await semantic(file))).toEqual([]);
+  });
+
+  it("offers no fix where an edit would change the meaning", async () => {
+    // `decode T from a ?? b` decodes only `a`, so `const x: T = a ?? b` gets no fix.
+    const file = await openNew("nofix.seam.ts", 'import { Order } from "./api.seam";\nexport const x: Order = JSON.parse("{}") ?? null;\n');
+    const found = await fixesOf(file);
+    expect(found.map((f) => f.code)).toEqual(["TS-assignment"]);
+    expect(found[0]!.fixes).toEqual([]);
+  });
+});

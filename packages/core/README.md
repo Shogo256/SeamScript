@@ -4,15 +4,23 @@ A WebAssembly core that performs `Text` normalization (NFC / NFD) and grapheme s
 
 ## Usage
 
-In production builds, the compiler (`seamc build --production`, and the Vite and unplugin plugins) adds `import "@seamscript/core"` to each module. This import loads the WASM with a top-level await and plugs it into `@seamscript/runtime`. To load it yourself, import it once at your app's entry point.
+In production builds, the compiler (`seamc build --production`, and the Vite and unplugin plugins) adds `import "@seamscript/core"` to each module that uses Text. This import loads the WASM with a top-level await and plugs it into `@seamscript/runtime`, so those modules, and the ones that import them, run after the core is ready (about 10 ms to compile and instantiate on a desktop machine, after the download). A bundle that never uses Text carries no core. To load it yourself, import it once at your app's entry point.
 
 ```ts
 import "@seamscript/core";
 ```
 
+To start without waiting for it, import `@seamscript/core/deferred` instead (the plugins' `core: "deferred"`, or `seamc build --production --defer-core`). The load then runs in the background: `Text.status` is `"loading"` until it finishes, Text operations on anything but printable ASCII throw `CoreUnavailableError` (with `loading: true`) until then, and `Text.ready` settles when it has finished.
+
+```ts
+import "@seamscript/core/deferred";
+
+await Text.ready;                     // before the first Text operation
+```
+
 - **Loading never rejects, even when it fails.** Instead, `Text.status` becomes `"failed"` and Text operations throw `CoreUnavailableError`. Evaluation of your app doesn't stop, so check `Text.status` at startup and tell the user on screen.
 - **Your CSP needs `'wasm-unsafe-eval'`** (`script-src 'self' 'wasm-unsafe-eval'`).
-- The WASM is embedded in the JS as base64, so no bundler configuration is needed. It adds about 90KB gzipped.
+- The WASM is embedded in the JS as base64, so no bundler configuration is needed. It adds about 90KB gzipped (179KB of WASM, of which 143KB are Unicode data: about 113KB for normalization and 30KB for grapheme segmentation, both needed as soon as one Text value is decoded).
 - `@seamscript/runtime` is a peerDependency, so that the core plugs into the same instance the app uses.
 
 ## Speed

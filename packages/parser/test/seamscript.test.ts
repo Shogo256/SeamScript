@@ -54,6 +54,55 @@ describe("boundary", () => {
   });
 });
 
+describe("boundary field constraints", () => {
+  const constraints = (source: string) =>
+    parse(source)[0]!.body.members.map((m: AnyNode) => shape(m.typeAnnotation.constraints ?? null));
+
+  it("parses each constraint, several on one field", () => {
+    const [n, s, t] = constraints("boundary P { n: number in 1..65_535, s: string matches /^[a-z\\/]+$/u, t: Text<NFC> minLength 1 maxLength 40 }");
+    expect(n).toEqual([{ type: "SeamConstraint", kind: "in", min: "1", max: "65_535" }]);
+    expect(s).toEqual([{ type: "SeamConstraint", kind: "matches", pattern: { type: "RegExpLiteral", pattern: "^[a-z\\/]+$", flags: "u" } }]);
+    expect(t).toEqual([
+      { type: "SeamConstraint", kind: "minLength", value: 1 },
+      { type: "SeamConstraint", kind: "maxLength", value: 40 },
+    ]);
+  });
+
+  it("reads a range with negative and fractional bounds and spaces", () => {
+    expect(constraints("boundary P { x: number in - 5 .. 0.5 }")[0]).toEqual([{ type: "SeamConstraint", kind: "in", min: "-5", max: "0.5" }]);
+  });
+
+  it("ends the field's range where the constraints end", () => {
+    const [decl] = parse("boundary P { n: number in 1..9, m: number }");
+    const [n] = decl!.body.members;
+    expect(n.typeAnnotation.constraints[0].end).toBe("boundary P { n: number in 1..9".length);
+    expect(n.typeAnnotation.typeAnnotation.end).toBe("boundary P { n: number".length);
+  });
+
+  it("takes a constraint on the next line, but not a member named like one", () => {
+    expect(constraints("boundary P {\n  a: string\n    matches /x/\n}")[0]).toHaveLength(1);
+    const members = parse("boundary P {\n  a: number\n  minLength: number\n  maxLength?: string\n  in: boolean\n}")[0]!.body.members;
+    expect(members.map((m: AnyNode) => m.key.name)).toEqual(["a", "minLength", "maxLength", "in"]);
+    expect(members.every((m: AnyNode) => m.typeAnnotation.constraints === undefined)).toBe(true);
+  });
+
+  it("leaves nested annotations alone", () => {
+    expect(() => parse("boundary P { f: (x: string matches /a/) => void }")).toThrow();
+    expect(constraints("boundary P { f: (x: string) => void }")[0]).toBeNull();
+  });
+
+  it("reports a malformed constraint", () => {
+    expect(() => parse("boundary P { n: number in 1.. }")).toThrow(/a range such as 1\.\.100/);
+    expect(() => parse("boundary P { s: string matches 3 }")).toThrow(/a regular expression literal/);
+    expect(() => parse("boundary P { s: Text<NFC> maxLength x }")).toThrow(/a number/);
+  });
+
+  it("is not part of TypeScript type literals elsewhere", () => {
+    expect(() => parse("type P = { s: string matches /x/ }")).toThrow();
+    expect(() => parse("interface P { n: number in 1..2 }")).toThrow();
+  });
+});
+
 describe("decode", () => {
   it("parses the type and the operand", () => {
     expect(shape(expr("decode Order from await res.json()"))).toMatchObject({
@@ -99,6 +148,28 @@ describe("decode", () => {
       argument: { type: "Identifier", name: "v" },
     });
     expect(shape(expr("decode (string) from v"))).toMatchObject({ type: "SeamDecodeExpression" });
+  });
+
+  it("parses `from json`: the operand is JSON text", () => {
+    expect(shape(expr("decode Order from json text"))).toMatchObject({
+      type: "SeamDecodeExpression",
+      json: true,
+      argument: { type: "Identifier", name: "text" },
+    });
+    expect(shape(expr("decode Order from json await res.text()"))).toMatchObject({ json: true, argument: { type: "AwaitExpression" } });
+    expect(shape(expr("decode Order from json localStorage.getItem('k') ?? d"))).toMatchObject({
+      type: "LogicalExpression",
+      left: { json: true, argument: { type: "CallExpression" } },
+    });
+    expect(shape(expr("decode Order from json '[1]'"))).toMatchObject({ json: true, argument: { type: "StringLiteral" } });
+  });
+
+  it("keeps a variable named json the operand", () => {
+    for (const operand of ["json", "json(x)", "json.body", "json[0]", "json`x`", "json ?? x", "json as T"]) {
+      const node = shape(expr(`decode Order from ${operand}`)) as AnyNode;
+      const decode = node.type === "SeamDecodeExpression" ? node : (node.left ?? node.expression);
+      expect(decode.json, operand).toBe(false);
+    }
   });
 
   it("works inside JSX files", () => {

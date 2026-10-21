@@ -18,6 +18,10 @@
     "./load": {
       "types": "./dist/load.d.ts",
       "default": "./dist/load.js"
+    },
+    "./deferred": {
+      "types": "./dist/deferred.d.ts",
+      "default": "./dist/deferred.js"
     }
   },
   "files": [

@@ -11,12 +11,12 @@
 
 SeamScript is a strict superset of TypeScript where data from outside your program can't be used until it's checked. Files use the `.seam.ts` / `.seam.tsx` extensions, and the compiler, `seamc`, outputs plain, human-readable TypeScript.
 
-Data from outside (`res.json()`, `JSON.parse`, `localStorage.getItem`, `URLSearchParams.get`, `MessageEvent.data`) has the type `Unknown`, and you can't use it until you check it with `decode`. IDs above 2^53, money amounts, time zone offsets, and the way "one character" is counted each cross the boundary in a dedicated type. With `latest`, an old response can no longer overwrite a newer screen.
+Data from outside (`res.json()`, `res.text()`, `JSON.parse`, `localStorage.getItem`, `URLSearchParams.get`, `MessageEvent.data`, IndexedDB, the clipboard, files, `location.hash`, `history.state`, `document.cookie`, and whatever else you declare) has the type `Unknown`, and you can't use it until you check it with `decode`. IDs above 2^53, money amounts, time zone offsets, and the way "one character" is counted each cross the boundary in a dedicated type. With `latest`, an old response can no longer overwrite a newer screen.
 
 ```ts
 export boundary Order {
   id: Int64;          // exact even above 2^53 (bigint)
-  memo: Text<NFC>;    // normalized; length is counted in graphemes
+  memo: Text<NFC> maxLength 200;  // normalized; length is counted in graphemes
   total: Decimal;     // exact decimal, no rounding error
   placedAt: Zoned;    // timestamp with a UTC offset
   status: "open" | "paid";
@@ -24,7 +24,7 @@ export boundary Order {
 
 export async function load(id: string) {
   const res = await fetch(`/orders/${id}`);
-  const r = decode Order from await res.json();   // Result<Order, DecodeError>
+  const r = decode Order from json await res.text();   // Result<Order, DecodeError>, malformed JSON included
   if (!r.ok) return `${r.error.path.join(".")}: ${r.error.expected} expected, got ${r.error.actual}`;
   return Decimal.toFixed(r.value.total, 2);
 }
@@ -42,8 +42,8 @@ If you cast the result of `res.json()` with `as Order`, assign it to a `string` 
 
 | Syntax | Meaning |
 |---|---|
-| `boundary Name { ... }` / `boundary Name = A \| B` | Declares the type of data that crosses the boundary and its checker (decoder) at the same time. `Name.encode(value)` also turns a value into the form you send |
-| `decode T from v` | Checks `v` and returns `Result<T, DecodeError>`. Never throws |
+| `boundary Name { ... }` / `boundary Name = A \| B` | Declares the type of data that crosses the boundary and its checker (decoder) at the same time. A field's type can be followed by constraints: `matches /re/`, `minLength N`, `maxLength N`, `in A..B`. `Name.encode(value)` also turns a value into the form you send |
+| `decode T from v` / `decode T from json text` | Checks `v` and returns `Result<T, DecodeError>`. Never throws. With `json`, it parses the text first, and malformed JSON is a `DecodeError` too |
 | `latest async function` | Returns only the result of the most recent call. Older calls become `Stale`, and they are aborted if the function has an `AbortSignal` parameter |
 | `Unknown` | The type of data from outside. Its only exit is `decode` |
 | `Text<NFC \| NFD>`, `Int64`, `Decimal`, `Zoned` | Boundary types. At runtime they are plain strings or bigints, so they work directly with `===` and in JSX |
@@ -60,9 +60,10 @@ nix-shell --run 'yarn install --frozen-lockfile && yarn build'
 
 The toolchain (Node 24, TypeScript 5.9, Rust with wasm32) is defined in `shell.nix`. Without nix, you need Node 20 or later, yarn 1, and Rust with `rustup target add wasm32-unknown-unknown` already run.
 
-Once the packages are published, you install them like this:
+Once the packages are published, a new app starts with one command (Vite + React, or `--template vanilla` for Vite alone), and an existing project installs the packages:
 
 ```bash
+npm create seamscript my-app
 npm install @seamscript/runtime @seamscript/core
 npm install --save-dev @seamscript/compiler @seamscript/ts-plugin typescript
 ```
@@ -93,14 +94,52 @@ import { esbuild, rollup, rolldown, webpack, rspack } from "@seamscript/compiler
 // e.g. plugins: [esbuild()] for esbuild, plugins: [webpack()] for webpack
 ```
 
-The plugins only convert `.seam.ts` into TypeScript. The bundler strips the types (with webpack, your project's TS loader does), and `seamc check` does the type checking. In production builds, each module gets an import of the WASM core (`@seamscript/core`).
+The plugins only convert `.seam.ts` into TypeScript. The bundler strips the types (with webpack, your project's TS loader does), and `seamc check` does the type checking. In production builds, each module that uses Text (a `Text` field or decode, or a `Text.` call, in `.seam.ts` files and in plain `.ts` files that import `@seamscript/runtime`) gets an import of the WASM core (`@seamscript/core`); a bundle without Text carries no core. `seamc build --production` adds the import to the `.seam.ts` files it writes; a plain `.ts` file that uses Text there needs `import "@seamscript/core"` written in it, or once in the entry point.
+
+### More sources of outside data
+
+The common web APIs are sources already. Declare your own in `tsconfig.json`, as `Owner.member` (an interface, class, namespace or object type, and its method or property) or as a bare function or variable name. A call that returns a promise gives `Promise<Unknown>`.
+
+```jsonc
+{
+  "compilerOptions": { ... },
+  "seamscript": {
+    "sources": ["NativeBridge.receive", "AppStore.load", "readConfig"],
+    // "unknown" (the default): a library's `any` is an error until decoded (SEAM2005). "allow" lets it through.
+    "externalAny": "unknown"
+  }
+}
+```
+
+With `"externalAny": "unknown"`, a value whose declared type is `any` in a package's type declarations (`axios`'s `response.data`, for example) is reported where it is used, with a quick fix that decodes it.
+
+### Value constraints
+
+A boundary field's type can be followed by constraints, checked when the value is decoded (and by `encode`, which throws `EncodeRangeError` for a value that would not decode again):
+
+```ts
+export boundary Signup {
+  handle: string matches /^[a-z][a-z0-9_]{2,15}$/;
+  name: Text<NFC> minLength 1 maxLength 40;    // grapheme clusters, after normalization
+  port: number in 1..65535;                    // both ends included
+  quota: Int64 in 0..1_000_000;
+  tags: string[] maxLength 10;                 // elements
+  nickname?: Text<NFC> | null maxLength 20;    // checked when present and not null
+}
+```
+
+`matches` takes string and Text fields (the usual `RegExp.test`, so anchor the pattern with `^` and `$` to match the whole value); `minLength` and `maxLength` take Text (grapheme clusters) and arrays (elements); `in` takes number and Int64. A plain `string` has no length constraint: declare the field `Text<NFC>` to count characters. The type stays as declared (`port` is a `number`); a failed constraint is a `DecodeError` such as `expected: "number in 1..65535", actual: "number (out of range)"`, which never quotes the value itself.
 
 ### Editors
 
 - **VS Code**: install the extension (`packages/vscode`). `yarn build` produces `packages/vscode/dist/seamscript-0.0.0.vsix`; install it with `code --install-extension`.
 - **Other editors that use tsserver**: add `"plugins": [{ "name": "@seamscript/ts-plugin" }]` to `tsconfig.json`.
 
-Completion, hover types, go to definition, rename, and both TypeScript and SeamScript diagnostics work through `boundary` and `decode`.
+Completion, hover types, go to definition, rename, and both TypeScript and SeamScript diagnostics work through `boundary` and `decode`. Every SeamScript message says how to fix it, and the mechanical fixes are quick fixes: decoding a value assigned to a typed variable (`const o: Order = JSON.parse(s)` becomes `const o = decode Order from JSON.parse(s)`), `Text.length(t)` and `Text.at(t, i)` for code-unit access, `Order.encode(o)` inside `JSON.stringify`, and `AbortSignal` for a latest function's signal parameter.
+
+### React
+
+`@seamscript/react` gives a component its own line of a latest function: `const find = useFork(search)`. Its calls make only that component's earlier calls stale, and unmounting cancels whatever is in flight.
 
 ## Things to know for production
 
@@ -118,33 +157,34 @@ Completion, hover types, go to definition, rename, and both TypeScript and SeamS
   // await somethingElse();          // waiting here before applying breaks the ordering guarantee
   ```
 
-- **JSON syntax errors are outside decode.** Both `res.json()` and `JSON.parse` throw on malformed input. `decode` returns only shape errors as values.
+- **The core is loaded before your app's code runs.** The production import of `@seamscript/core` instantiates the WASM with a top-level await, so the modules that use Text (and everything that imports them) start after it: about 90KB gzipped to download and about 10 ms to compile and instantiate on a desktop machine. To start without waiting, use `seamscript({ core: "deferred" })` in Vite (or `seamc build --production --defer-core`): the core then loads in the background, `Text.status` is `"loading"` until it is ready, and Text operations on anything but printable ASCII throw `CoreUnavailableError` (with `loading: true`) until then. Await `Text.ready` before the first one:
 
   ```ts
-  let body: Unknown;
-  try {
-    body = await res.json();
-  } catch {
-    return { kind: "not json" } as const;
-  }
-  const r = decode Order from body;
+  await Text.ready;                   // settles when the core is loaded, or has failed
+  if (Text.status === "failed") showError();
   ```
 
-- **On a WebSocket, go through `decode string from e.data`.** `e.data` is `Unknown`, so you can't pass it straight to `JSON.parse`. It is one extra step, but it lets you tell binary frames apart.
+- **Parse JSON inside decode.** `res.json()` and `JSON.parse` throw on malformed input; `decode T from json text` returns it as a `DecodeError` (`expected: "JSON"`) like any other bad input.
+
+  ```ts
+  const r = decode Order from json await res.text();
+  if (!r.ok) return r.error;          // malformed JSON or the wrong shape
+  ```
+
+- **On a WebSocket, decode the frame as JSON text.** `e.data` is `Unknown`; a binary frame is a `DecodeError` with `expected: "JSON text"`.
 
   ```ts
   ws.onmessage = (e) => {
-    const text = decode string from e.data;
-    if (!text.ok) return;                      // binary frame
-    let raw: Unknown;
-    try {
-      raw = JSON.parse(text.value);
-    } catch {
-      return;                                  // malformed JSON
-    }
-    const msg = decode ServerMessage from raw;
+    const msg = decode ServerMessage from json e.data;
     if (msg.ok) apply(msg.value);
   };
+  ```
+
+- **Mixing a branded value with plain strings in an array literal gives `string[]`.** TypeScript keeps the wider of two types when one contains the other, so `[m.label, m.placedAt]` (a `string` and a `Zoned`) is `string[]` and `placedAt` loses its brand. Two different brands stay apart (`(Zoned | Text<"NFC">)[]`). To keep each element's type, annotate a tuple or use `as const`:
+
+  ```ts
+  const row: [string, Zoned] = [m.label, m.placedAt];
+  const same = [m.label, m.placedAt] as const;   // readonly [string, Zoned]
   ```
 
 - **On the dev server, Text runs on the browser's ICU** (the WASM core isn't loaded, so startup is fast). `Text.status` is then `"host"`, and the Unicode version depends on the browser. In production builds it is `"core"`.
@@ -157,7 +197,9 @@ Completion, hover types, go to definition, rename, and both TypeScript and SeamS
 | [`@seamscript/core`](packages/core) | WASM core for Text normalization and grapheme segmentation (Unicode 17.0.0). The backend can use it too, as the Rust crate `seamscript-core` |
 | [`@seamscript/compiler`](packages/compiler) | `seamc` (check / build / transform), plugins for Vite and unplugin |
 | [`@seamscript/parser`](packages/parser) | A fork of `@babel/parser` with SeamScript syntax added |
-| [`@seamscript/ts-plugin`](packages/ts-plugin) | tsserver plugin (editor support) |
+| [`@seamscript/ts-plugin`](packages/ts-plugin) | tsserver plugin (editor support, quick fixes) |
+| [`@seamscript/react`](packages/react) | `useFork`: a component's own line of a latest function |
+| [`create-seamscript`](packages/create-seamscript) | `npm create seamscript`: a new app with Vite, `seamc check` and the WASM core |
 | [`seamscript` (VS Code extension)](packages/vscode) | The tsserver plugin plus syntax highlighting |
 
 ## This repository

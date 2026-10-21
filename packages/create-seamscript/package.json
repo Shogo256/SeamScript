@@ -1,0 +1,30 @@
+{
+  "name": "create-seamscript",
+  "version": "0.0.0",
+  "description": "Start a SeamScript app: `npm create seamscript my-app` sets up Vite, seamc check, the WASM core and editor support",
+  "keywords": [
+    "seamscript",
+    "create",
+    "scaffold",
+    "vite",
+    "react"
+  ],
+  "type": "module",
+  "bin": {
+    "create-seamscript": "./index.js"
+  },
+  "files": [
+    "index.js",
+    "templates"
+  ],
+  "scripts": {
+    "test": "vitest run"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "vitest": "5.0.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

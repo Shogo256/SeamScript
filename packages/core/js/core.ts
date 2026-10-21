@@ -193,7 +193,8 @@ export function createCore(x: CoreExports, { shortcuts = true }: { shortcuts?: b
     for (let i = 0; i < len; i++) view[at + i] = s.charCodeAt(i);
   };
 
-  const utf16 = new TextDecoder("utf-16le");
+  // ignoreBOM: a leading U+FEFF is text, not a byte-order mark to drop.
+  const utf16 = new TextDecoder("utf-16le", { ignoreBOM: true });
   const readString = (): string => {
     fresh();
     const at = u32[slot]! >>> 1;

@@ -1,9 +1,10 @@
 import { memo, useEffect, useState } from "react";
+import { useFork } from "@seamscript/react";
 import type { Fill } from "../api.seam";
 import { clock, int, preview, price, statusLabel } from "../format.seam";
 import { describeProblem } from "../http.seam";
 import { cancelOrder, loadOrderDetail } from "../orders.seam";
-import { useFork, useInstrumentInfo, useOrder, useOrderIds } from "./hooks.seam";
+import { useInstrumentInfo, useOrder, useOrderIds } from "./hooks.seam";
 
 /** Rows rendered at once; the rest are counted. */
 const SHOWN = 200;
@@ -77,7 +78,7 @@ const OrderRow = memo(function OrderRow({ id, selected, onSelect }: { id: Int64;
 type Loaded = { readonly id: Int64; readonly fills: readonly Fill[] } | { readonly id: Int64; readonly error: string };
 
 function OrderDetailPanel({ id }: { id: Int64 | null }) {
-  const detail = useFork(() => loadOrderDetail.fork());
+  const detail = useFork(loadOrderDetail);
   const order = useOrder(id ?? -1n);
   const info = useInstrumentInfo(order?.instrumentId ?? -1n);
   const [loaded, setLoaded] = useState<Loaded | null>(null);

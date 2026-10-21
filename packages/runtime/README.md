@@ -11,10 +11,12 @@ type DecodeError = { kind: "decode"; path: string[]; expected: string; actual: s
 
 `decode T from v` never throws; it returns `Result<T, DecodeError>`. `path` is where it failed (`["orders", "3", "price"]`), `expected` is the type it wanted, and `actual` is the name of the actual type. The value itself is never included (so personal data doesn't end up in logs). The exception is a mismatched literal: for strings of 40 characters or fewer and for numbers, the value is shown, as in `"pending"`.
 
+- `decode T from json text` parses `text` first. Malformed JSON is a failure with `expected: "JSON"` and `actual: "malformed JSON"` (the parser's message, which quotes the input, is not passed on), and input that is not a string has `expected: "JSON text"`.
+- Constraints on boundary fields (`matches /re/`, `minLength`, `maxLength`, `in A..B`) fail with the field's whole expectation, as in `expected: "text of length 1..40"`, `actual: "length 41"`, or `expected: "string matching /^[a-z]+$/"`, `actual: "string (no match)"`.
 - Nesting is limited to 512 levels (`MAX_DEPTH`). Deeper input returns a failure.
 - Only own properties are read. Exceptions thrown by getters or Proxies are also returned as a failure (`"unreadable"`).
 - Fields that aren't in the boundary are dropped, so the backend can add fields without breaking anything.
-- A boundary name is also a value. `Order.encode(order)` returns a shape you can pass straight to `JSON.stringify` (an Int64 becomes a string; if it is out of range, `EncodeRangeError` is thrown).
+- A boundary name is also a value. `Order.encode(order)` returns a shape you can pass straight to `JSON.stringify` (an Int64 becomes a string). A value that would not decode again throws `EncodeRangeError` with its path: an Int64 outside the 64-bit range, or a field that breaks its constraint.
 
 ## Boundary types
 
@@ -48,7 +50,12 @@ Text.slice(memo, 0, 32);            // the first 32 graphemes
 Text.at(memo, -1);                  // the last grapheme
 ```
 
-In production builds these are computed by `@seamscript/core` (WASM, Unicode 17.0.0), so every browser and server gets the same result. `Text.status` is one of `"core"` (the WASM core), `"host"` (development; the environment's ICU), or `"failed"` (the core couldn't load; Text operations throw `CoreUnavailableError`).
+In production builds these are computed by `@seamscript/core` (WASM, Unicode 17.0.0), so every browser and server gets the same result. `Text.status` is one of `"core"` (the WASM core), `"host"` (development; the environment's ICU), `"loading"` (`@seamscript/core/deferred` is still loading), or `"failed"` (the core couldn't load; Text operations throw `CoreUnavailableError`). While loading, Text operations on anything but printable ASCII throw `CoreUnavailableError` with `loading: true`; `Text.ready` is a promise that settles once the load has finished (successfully or not), and is already settled when nothing is loading.
+
+```ts
+await Text.ready;
+if (Text.status === "failed") showError();
+```
 
 ## latest
 
@@ -59,8 +66,8 @@ const r = await search(q);
 if (!r.ok && r.error.kind === "stale") return;   // a newer search has started
 ```
 
-`search.fork()` returns a copy with its own, independent generation. Keep one per component and call `cancel()` on unmount; every call made through that copy then becomes `Stale`. For a generic function, fix the type arguments, as in `search.fork<T>()`. The guarantee holds only when you apply the result in the first continuation right after `await` (don't put another `await` in between).
+`search.fork()` returns a copy with its own, independent generation. Keep one per component and call `cancel()` on unmount; every call made through that copy then becomes `Stale`. In React, `useFork(search)` from `@seamscript/react` does both. For a generic function, fix the type arguments, as in `search.fork<T>()`. The guarantee holds only when you apply the result in the first continuation right after `await` (don't put another `await` in between).
 
 ## Unknown and fetch
 
-`Unknown` is the type of data from outside, and its only exits are `decode` and `Unknown.log(v)` (for debugging; it only prints the value). Inside `.seam.ts`, `fetch` comes from this package: underneath it is the global `fetch`, but `res.json()` has the type `Promise<Unknown>`.
+`Unknown` is the type of data from outside, and its only exits are `decode` and `Unknown.log(v)` (for debugging; it only prints the value). Which values are outside data is decided by the compiler: the web APIs that deliver it (`Body.json` and `text`, `JSON.parse`, `Storage.getItem`, `URLSearchParams.get`, `MessageEvent.data`, `IDBRequest.result`, `Clipboard.readText`, `Blob.text`, `FileReader.result`, `Location.hash`, `History.state`, `Document.cookie`, and others), plus whatever the project declares in `tsconfig.json` (see `@seamscript/compiler`). Inside `.seam.ts`, `fetch` comes from this package: underneath it is the global `fetch`, but `res.json()` has the type `Promise<Unknown>`.

@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, useSyncExternalStore } from "react";
+import { createContext, useContext, useSyncExternalStore } from "react";
 import type { Feed } from "../feed.seam";
 
 export const FeedContext = createContext<Feed | null>(null);
@@ -42,14 +42,4 @@ export function useOrder(id: Int64) {
 export function useProblems() {
   const feed = useFeed();
   return useSyncExternalStore(feed.subscribe, () => feed.problems);
-}
-
-/**
- * A component's own line of a latest function (`f.fork()`): its calls only make
- * its own earlier calls stale, and unmounting cancels whatever is in flight.
- */
-export function useFork<F extends { cancel(): void }>(make: () => F): F {
-  const [fork] = useState(make);
-  useEffect(() => () => fork.cancel(), [fork]);
-  return fork;
 }

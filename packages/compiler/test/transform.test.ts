@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import { transform } from "../src/transform.js";
+import { cleanup, project } from "./helpers.js";
 
 const run = (source: string, file = "a.seam.ts") => transform(source, file);
 const code = (source: string, file?: string) => {
@@ -8,6 +9,8 @@ const code = (source: string, file?: string) => {
   return r.code;
 };
 const codes = (source: string) => run(source).diagnostics.map((d) => d.code);
+
+afterAll(cleanup);
 
 describe("boundary", () => {
   it("emits the type and its decoder", () => {
@@ -111,6 +114,71 @@ export boundary PaymentEvent = Paid | Refunded`);
   });
 });
 
+describe("boundary constraints", () => {
+  it("wraps each field's decoder and leaves the type as declared", () => {
+    const out = code(`boundary Account {
+  handle: string matches /^[a-z][a-z0-9_]*$/u,
+  name: Text<NFC> matches /\\S/ minLength 1 maxLength 40,
+  port: number in 1..65_535,
+  quota?: Int64 in -5..1000,
+  tags: string[] maxLength 10,
+  nick: Text<NFC> | null minLength 2,
+  ratio: number in -0.5..0.5
+}`);
+    expect(out).toContain(`type Account = {
+  handle: string,
+  name: Text<"NFC">,
+  port: number,
+  quota?: Int64,
+  tags: string[],
+  nick: Text<"NFC"> | null,
+  ratio: number
+};`);
+    expect(out).toContain(`  handle: __b.matches(__b.string, /^[a-z][a-z0-9_]*$/u),
+  name: __b.length(__b.matches(__b.text("NFC"), /\\S/), 1, 40),
+  port: __b.range(__b.number, 1, 65535),
+  quota: __b.optional(__b.range(__b.int64, -5n, 1000n)),
+  tags: __b.length(__b.array(__b.string), 0, 10),
+  nick: __b.nullable(__b.length(__b.text("NFC"), 2)),
+  ratio: __b.range(__b.number, -0.5, 0.5),`);
+  });
+
+  it("rejects a constraint the field's type cannot take, with what it applies to", () => {
+    const message = (field: string) => run(`boundary X { ${field} }`).diagnostics.map((d) => `${d.code} ${d.message}`);
+    expect(message("s: string maxLength 3")).toEqual([
+      "SEAM1107 `maxLength` applies to Text fields (grapheme clusters) and arrays (elements); for a length in characters, declare the field Text<NFC>. `string` takes no `maxLength`.",
+    ]);
+    for (const field of ["n: number matches /1/", "t: Text<NFC> in 1..2", "d: Decimal in 1..2", "b: boolean minLength 1", 'k: "a" | "b" matches /a/', "a: string[] matches /a/"]) {
+      expect(codes(`boundary X { ${field} }`), field).toEqual(["SEAM1107"]);
+    }
+  });
+
+  it("rejects constraints that no value or no consistent test can satisfy", () => {
+    for (const field of [
+      "t: Text<NFC> minLength 5 maxLength 2",
+      "n: number in 10..1",
+      "i: Int64 in 0.5..2",
+      "s: string matches /a/g",
+      "s: string matches /(/",
+      "t: Text<NFC> maxLength 1.5",
+      "t: Text<NFC> maxLength 1 maxLength 2",
+    ]) {
+      expect(codes(`boundary X { ${field} }`), field).toEqual(["SEAM1107"]);
+    }
+  });
+
+  it("decodes and encodes with the constraints at runtime", async () => {
+    const [path] = project({
+      "account.ts": code(`export boundary Account { handle: string matches /^[a-z]+$/, name: Text<NFC> maxLength 3, port: number in 1..65535, quota: Int64 in 0..10 }`),
+    });
+    const { Account } = (await import(path!)) as { Account: { decode(v: unknown): unknown; encode(v: unknown): unknown } };
+    expect(Account.decode({ handle: "ada", name: "e\u0301ab", port: 80, quota: "10" })).toEqual({ ok: true, value: { handle: "ada", name: "\u00e9ab", port: 80, quota: 10n } });
+    expect(Account.decode({ handle: "ada", name: "abcd", port: 80, quota: 1 })).toMatchObject({ ok: false, error: { path: ["name"], expected: "text of length 3 or less" } });
+    expect(Account.decode({ handle: "ada", name: "a", port: 80, quota: 11 })).toMatchObject({ ok: false, error: { path: ["quota"], expected: "int64 in 0..10" } });
+    expect(() => Account.encode({ handle: "Ada", name: "a", port: 80, quota: 1n })).toThrow(/at \["handle"\]/);
+  });
+});
+
 describe("decode", () => {
   it("becomes __decode with the target's decoder", () => {
     expect(code("const r = decode Order from await res.json();")).toContain("const r = __decode(Order, await res.json());");
@@ -128,6 +196,14 @@ describe("decode", () => {
 
   it("rejects targets that cannot be decoded", () => {
     expect(codes("const r = decode any from v;")).toEqual(["SEAM1101"]);
+  });
+});
+
+describe("decode from json", () => {
+  it("becomes __decodeJson", () => {
+    expect(code("const r = decode Order from json text;")).toContain("const r = __decodeJson(Order, text);");
+    expect(code("const r = decode Int64[] from /* c */ json await res.text();")).toContain("const r = __decodeJson(__b.array(__b.int64), await res.text());");
+    expect(code("const r = decode A from json;")).toContain("const r = __decode(A, json);");
   });
 });
 
@@ -188,12 +264,19 @@ describe("runtime import", () => {
     expect(out).toBe('#!/usr/bin/env node\n"use client";\nimport { fetch } from "@seamscript/runtime";\nfetch(u);');
   });
 
-  it("imports the WASM core first in production output", () => {
-    expect(run("fetch(u);", "a.seam.ts").code).not.toContain("@seamscript/core");
-    expect(transform('"use client";\nfetch(u);', "a.seam.ts", { production: true }).code).toBe(
-      '"use client";\nimport "@seamscript/core";\nimport { fetch } from "@seamscript/runtime";\nfetch(u);',
+  it("imports the WASM core in production output of files that use Text at run time", () => {
+    expect(run("Text.nfc(u);", "a.seam.ts").code).not.toContain("@seamscript/core");
+    expect(transform('"use client";\nText.nfc(u);', "a.seam.ts", { production: true }).code).toBe(
+      '"use client";\nimport "@seamscript/core";\nimport { Text } from "@seamscript/runtime";\nText.nfc(u);',
     );
-    expect(transform("export const x = 1;", "a.seam.ts", { production: true }).code).toBe('import "@seamscript/core";\nexport const x = 1;');
+    // A boundary with a Text field, and a decode of Text, normalize at run time.
+    expect(transform("boundary M { memo: Text<NFC> }", "a.seam.ts", { production: true }).code).toMatch(/^import "@seamscript\/core";/);
+    expect(transform("export const r = (v: Unknown) => decode Text<NFC>[] from v;", "a.seam.ts", { production: true }).code).toMatch(/^import "@seamscript\/core";/);
+    // Text only as a type, and files without Text, leave the core out.
+    expect(transform("export const f = (t: Text<NFC>): string => t;\nfetch(u);", "a.seam.ts", { production: true }).code).not.toContain("@seamscript/core");
+    expect(transform("export boundary P { n: Int64 }", "a.seam.ts", { production: true }).code).not.toContain("@seamscript/core");
+    // deferCore picks the entry that does not hold up start-up.
+    expect(transform("Text.nfc(u);", "a.seam.ts", { production: true, deferCore: true }).code).toMatch(/^import "@seamscript\/core\/deferred";/);
   });
 
   it("leaves files without SeamScript features untouched", () => {

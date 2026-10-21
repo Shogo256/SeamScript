@@ -1,6 +1,17 @@
 # @seamscript/ts-plugin
 
-A plugin for TypeScript's language service (tsserver). When you write `.seam.ts` / `.seam.tsx` in an editor, it makes TypeScript's features (completion, hover types, go to definition, references, rename, type errors) work through `boundary`, `decode` and `latest`, and it reports SeamScript diagnostics (the same ones as `seamc check`).
+A plugin for TypeScript's language service (tsserver). When you write `.seam.ts` / `.seam.tsx` in an editor, it makes TypeScript's features (completion, hover types, go to definition, references, rename, type errors) work through `boundary`, `decode` and `latest`, and it reports SeamScript diagnostics (the same ones as `seamc check`, with the project's `"seamscript"` settings from `tsconfig.json`).
+
+## Quick fixes
+
+Each fix is offered on the diagnostic it repairs, and the fixed code checks clean:
+
+| Diagnostic | Fix |
+|---|---|
+| SEAM2001, SEAM2005, and TypeScript's assignment errors (TS2322, TS2739–TS2741) on a variable with a boundary type | `const o: Order = JSON.parse(s)` becomes `const o = decode Order from JSON.parse(s)` (`o` is then a Result to check) |
+| SEAM2101 | `t.length` becomes `Text.length(t)`; `t[i]` becomes `Text.at(t, i)` |
+| SEAM2201 | `JSON.stringify(order)` becomes `JSON.stringify(Order.encode(order))`; an array of a boundary becomes `orders.map(Order.encode)` |
+| SEAM1402 | The signal parameter's type becomes `AbortSignal` |
 
 ## Usage
 

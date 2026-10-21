@@ -10,6 +10,7 @@ import { type CodeRange, segmentOffsets } from "./mappings.js";
 import {
   type AnyNode,
   end,
+  type FieldAnnotation,
   parse,
   type SeamBoundaryDeclaration,
   type SeamDecodeExpression,
@@ -22,6 +23,7 @@ import { Codes, type Diagnostic, lineColumn } from "./diagnostics.js";
 
 export const RUNTIME_MODULE = "@seamscript/runtime";
 export const CORE_MODULE = "@seamscript/core";
+export const DEFERRED_CORE_MODULE = "@seamscript/core/deferred";
 
 /** Runtime names a `.seam.ts` file may use without importing them (when it does not bind them itself). */
 const AMBIENT_VALUES = ["Decimal", "Int64", "Text", "Unknown", "Zoned", "fetch"];
@@ -41,11 +43,16 @@ export interface UnknownWrap {
 export interface TransformOptions {
   wraps?: readonly UnknownWrap[];
   /**
-   * Production output also imports `@seamscript/core`, whose top-level await
-   * installs the WASM core before this module runs, so Text is deterministic.
-   * Development output runs on the host's ICU instead (Text.deterministic is false).
-   */
+   * Production output of a file that uses Text at run time (a Text function, or a
+   * decoder with a Text field) also imports `@seamscript/core`, whose top-level
+   * await installs the WASM core before this module runs, so Text is
+   * deterministic. Files without Text leave the core out of the bundle.*/
   production?: boolean;
+  /**
+   * Import `@seamscript/core/deferred` instead: the core loads without holding up
+   * this module, and Text waits for `Text.ready` (see that entry).
+   */
+  deferCore?: boolean;
 }
 
 export interface TransformResult {
@@ -109,6 +116,7 @@ export function transform(source: string, fileName: string, options: TransformOp
   const latests: SeamLatestDeclaration[] = [];
   const textForms: t.TSTypeReference[] = [];
   const usedAmbient = new Set<string>();
+  let textAtRuntime = false;
   const names = new Set<string>();
   const skip = new Set<AnyNode>();
 
@@ -118,7 +126,7 @@ export function transform(source: string, fileName: string, options: TransformOp
       case "SeamBoundaryDeclaration": {
         const top = parent?.type === "Program" || (parent?.type === "ExportNamedDeclaration" && grandparent?.type === "Program");
         if (!top) {
-          scope.report(node, Codes.boundaryPlacement, "A boundary must be declared at the top level of a module.");
+          scope.report(node, Codes.boundaryPlacement, "A boundary must be declared at the top level of a module; move it out of the function or block (export it if other modules need it).");
           return false;
         }
         const stmt = parent!.type === "Program" ? node : parent!;
@@ -145,6 +153,10 @@ export function transform(source: string, fileName: string, options: TransformOp
         break;
       case "Identifier":
         names.add(node.name);
+        // `Text.nfc(...)`, `Text.length(t)`: Text as a value, which needs the core at run time.
+        if (node.name === "Text" && parent !== null && !parent.type.startsWith("TS") && isReferenced(node as t.Node, parent as t.Node, (grandparent ?? undefined) as t.Node | undefined)) {
+          textAtRuntime = true;
+        }
         if (
           (AMBIENT_VALUES.includes(node.name) || AMBIENT_TYPES.includes(node.name)) &&
           !bound.has(node.name) &&
@@ -173,6 +185,12 @@ export function transform(source: string, fileName: string, options: TransformOp
     const name = node.id.name;
     const exp = exported ? "export " : "";
     s.overwrite(start(node), start(node) + "boundary".length, "type");
+    // Constraints check values, not types: the type keeps only what precedes them.
+    for (const member of node.body?.members ?? []) {
+      const annotation = (member as { typeAnnotation?: FieldAnnotation | null }).typeAnnotation;
+      const constraints = annotation?.constraints;
+      if (constraints?.length) s.remove(end(annotation!.typeAnnotation), end(constraints[constraints.length - 1]!));
+    }
     let decoder: string | undefined;
     let declaredType: string;
     if (node.body) {
@@ -201,19 +219,23 @@ export function transform(source: string, fileName: string, options: TransformOp
   }
   for (const w of wraps.sort((a, b) => a.end - b.end || b.start - a.start)) s.appendLeft(w.end, ")");
 
-  // decode X from v  →  __decode(X, v)
+  // decode X from v       →  __decode(X, v)
+  // decode X from json v  →  __decodeJson(X, v)
   const decoderTexts = new Map<SeamDecodeExpression, string>();
   for (const node of decodes) {
     const decoder = decoderFor(node.typeAnnotation, scope, { kind: "decode" });
     decoderTexts.set(node, decoder ?? "undefined as any");
     // Parentheses around the whole target are not part of its node (Babel keeps no
     // node for them); the parser has checked that `from` follows them.
-    const from = /(?:\s|\)|\/\*[\s\S]*?\*\/|\/\/[^\n]*\n)*from\b/y;
+    const gap = String.raw`(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\n]*\n)*`;
+    const json = node.json ? String.raw`${gap}json\b` : "";
+    const from = new RegExp(String.raw`(?:\s|\)|\/\*[\s\S]*?\*\/|\/\/[^\n]*\n)*from\b${json}`, "y");
     from.lastIndex = end(node.typeAnnotation);
     if (!from.test(source)) throw new Error(`Internal error: no "from" after the decode target at ${fileName}:${start(node)}`);
-    s.overwrite(start(node), from.lastIndex, `__decode(${decoder ?? "undefined as any"},`);
+    const helper = decodeHelper(node);
+    s.overwrite(start(node), from.lastIndex, `${helper}(${decoder ?? "undefined as any"},`);
     s.appendLeft(end(node), ")");
-    helpers.add("__decode");
+    helpers.add(helper);
     if (decoder?.includes("__b.")) helpers.add("__b");
   }
 
@@ -221,7 +243,7 @@ export function transform(source: string, fileName: string, options: TransformOp
   for (const node of latests) {
     const fn = node.declaration;
     if (fn.generator) {
-      scope.report(node, Codes.latestShape, "A latest function cannot be a generator.");
+      scope.report(node, Codes.latestShape, "A latest function cannot be a generator; remove the `*` and return the final value (a latest function settles once per call).");
       continue;
     }
     const name = fn.id!.name;
@@ -275,8 +297,10 @@ export function transform(source: string, fileName: string, options: TransformOp
     ...[...helperTypes].sort().map((n) => `type ${n} as __${n}`),
     ...[...usedAmbient].filter((n) => AMBIENT_TYPES.includes(n)).sort().map((n) => `type ${n}`),
   ];
+  // Decoders with a Text field (in a boundary or after `decode`) normalize what they decode.
+  if (options.production && !textAtRuntime && s.toString().includes("__b.text(")) textAtRuntime = true;
   const imports = [
-    ...(options.production ? [`import "${CORE_MODULE}";`] : []),
+    ...(options.production && textAtRuntime ? [`import "${options.deferCore ? DEFERRED_CORE_MODULE : CORE_MODULE}";`] : []),
     ...(specifiers.length > 0 ? [`import { ${specifiers.join(", ")} } from "${RUNTIME_MODULE}";`] : []),
   ];
   if (imports.length > 0) {
@@ -291,6 +315,8 @@ export function transform(source: string, fileName: string, options: TransformOp
   const map = s.generateMap({ source: fileName, hires: true, includeContent: true });
   return { code, map, links: links(source, code, map, boundaries, decoderTexts, latests), diagnostics, syntaxError: false };
 }
+
+const decodeHelper = (node: SeamDecodeExpression) => (node.json ? "__decodeJson" : "__decode");
 
 function links(
   source: string,
@@ -313,7 +339,8 @@ function links(
   }
   for (const [node, decoder] of decoders) {
     const at = generatedAt.get(start(node));
-    if (at === undefined || !code.startsWith(`__decode(${decoder},`, at)) continue;
+    const helper = decodeHelper(node);
+    if (at === undefined || !code.startsWith(`${helper}(${decoder},`, at)) continue;
     // The decoder names the target's boundaries in the order the type does.
     let from = 0;
     walk(node.typeAnnotation, (n) => {
@@ -323,7 +350,7 @@ function links(
       const hit = m.exec(decoder);
       if (hit === null) return;
       from = hit.index + n.name.length;
-      out.push({ source: start(n), generated: at + "__decode(".length + hit.index, length: n.name.length });
+      out.push({ source: start(n), generated: at + helper.length + 1 + hit.index, length: n.name.length });
     });
   }
   for (const node of latests) {

@@ -2,7 +2,7 @@ import type { Brand } from "./brand.js";
 import { type Decimal, normalizeDecimal } from "./decimal.js";
 import { Int64, parseInt64 } from "./int64.js";
 import { type DecodeError, type Result, err, ok } from "./result.js";
-import { type Text, type TextForm, decodeText } from "./text.js";
+import { Text, type TextForm, decodeText } from "./text.js";
 import { type Zoned, normalizeZoned } from "./zoned.js";
 
 /**
@@ -44,8 +44,17 @@ export interface Decoder<T> {
   readonly expected: string;
   /** Never throws for bad data: failures come back as `{ ok: false }`. */
   decode(input: unknown): Result<T, DecodeError>;
-  /** Throws `EncodeRangeError` if an Int64 is outside the 64-bit range. */
-  encode(value: T): Encoded<T>;
+  /**
+   * `decode T from json text`: parses `text` as JSON, then decodes it. Input that
+   * is not a string, or not JSON, is a DecodeError too, never an exception.
+   */
+  decodeJson(text: unknown): Result<T, DecodeError>;
+  /**
+   * Throws `EncodeRangeError` if an Int64 is outside the 64-bit range. NoInfer:
+   * inferring T backwards from `Encoded<T>` would find the unbranded shape (all
+   * strings) and drop the brands of what `__decode(decoder, v)` returns.
+   */
+  encode(value: T): Encoded<NoInfer<T>>;
   readonly [RUN]: (input: unknown, depth: number) => Step<T>;
   // Method syntax keeps Decoder covariant in practice, so a Decoder<Order> can be
   // stored where a Decoder<unknown> is expected (lists of decoders, union members).
@@ -107,6 +116,10 @@ function make<T, X extends object = {}>(
       return expected();
     },
     decode: (input) => finish(run(input, 0)),
+    decodeJson: (text) => {
+      const parsed = parseJson(text);
+      return finish(parsed instanceof Failure ? parsed : run(parsed.value, 0));
+    },
     encode: (value) => write(value) as Encoded<T>,
     [RUN]: run,
     [WRITE]: write,
@@ -114,6 +127,16 @@ function make<T, X extends object = {}>(
   // Descriptors rather than Object.assign, so getters in `extra` stay lazy.
   if (extra !== undefined) Object.defineProperties(d, Object.getOwnPropertyDescriptors(extra));
   return d as Decoder<T> & X;
+}
+
+// The parser's message is not passed on: it quotes the input, which may be personal data.
+function parseJson(text: unknown): Failure | { value: unknown } {
+  if (typeof text !== "string") return new Failure("JSON text", describe(text));
+  try {
+    return { value: JSON.parse(text) as unknown };
+  } catch {
+    return new Failure("JSON", "malformed JSON");
+  }
 }
 
 function describe(v: unknown): string {
@@ -306,6 +329,54 @@ function nullable<T>(inner: Decoder<T>): Decoder<T | null> {
   );
 }
 
+/**
+ * A boundary field's constraint (`matches /re/`, `minLength 1`, `in 1..65535`):
+ * `inner`, narrowed by `test`. A value that fails it is a decode failure; one
+ * given to `encode` throws EncodeRangeError, since it would not decode again.
+ * A mismatch of `inner` itself reports this decoder's expectation.
+ */
+function constrained<T>(inner: Decoder<T>, rule: string, test: (value: T) => string | undefined): Decoder<T> {
+  const expected = `${inner.expected} ${rule}`;
+  return make<T>(
+    () => expected,
+    (v, depth) => {
+      const r = inner[RUN](v, depth);
+      if (r instanceof Failure) {
+        return r.reversedPath.length === 0 && r.expected === inner.expected ? new Failure(expected, r.actual) : r;
+      }
+      const problem = test(r);
+      return problem === undefined ? r : new Failure(expected, problem);
+    },
+    (value) => {
+      const problem = test(value);
+      if (problem !== undefined) throw new EncodeRangeError(`Expected ${expected}, got ${problem}`);
+      return inner[WRITE](value);
+    },
+  );
+}
+
+/** `matches /re/` on a string or Text field. The pattern is used without its global or sticky flags. */
+function matches<T extends string>(inner: Decoder<T>, pattern: RegExp): Decoder<T> {
+  // `test` with the g or y flag advances lastIndex, so one value's result would depend on the previous one.
+  const re = pattern.global || pattern.sticky ? new RegExp(pattern.source, pattern.flags.replace(/[gy]/g, "")) : pattern;
+  // The value itself is not reported: it may be personal data.
+  return constrained(inner, `matching ${pattern}`, (v) => (re.test(v) ? undefined : `${inner.expected} (no match)`));
+}
+
+/** `minLength` / `maxLength` on a Text field (grapheme clusters) or an array field (elements). */
+function length<T extends string | readonly unknown[]>(inner: Decoder<T>, min: number, max: number = Infinity): Decoder<T> {
+  const rule = max === Infinity ? `of length ${min} or more` : min === 0 ? `of length ${max} or less` : `of length ${min}..${max}`;
+  return constrained(inner, rule, (v) => {
+    const n = typeof v === "string" ? Text.length(v as Text<TextForm>) : v.length;
+    return n >= min && n <= max ? undefined : `length ${n}`;
+  });
+}
+
+/** `in A..B` on a number or Int64 field: both ends included. */
+function range<T extends number | bigint>(inner: Decoder<T>, min: T, max: T): Decoder<T> {
+  return constrained(inner, `in ${min}..${max}`, (v) => (v >= min && v <= max ? undefined : `${inner.expected} (out of range)`));
+}
+
 /** For recursive boundaries: the decoder is looked up on first use, after the module has initialized. */
 function lazy<T>(get: () => Decoder<T>): Decoder<T> {
   let cached: Decoder<T> | undefined;
@@ -464,9 +535,17 @@ export const __b = {
   lazy,
   object,
   union,
+  matches,
+  length,
+  range,
 } as const;
 
 /** Compiled form of `decode X from v`. */
 export function __decode<T>(decoder: Decoder<T>, input: unknown): Result<T, DecodeError> {
   return decoder.decode(input);
+}
+
+/** Compiled form of `decode X from json text`. */
+export function __decodeJson<T>(decoder: Decoder<T>, text: unknown): Result<T, DecodeError> {
+  return decoder.decodeJson(text);
 }

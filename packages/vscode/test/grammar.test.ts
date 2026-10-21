@@ -60,12 +60,35 @@ describe("boundary", () => {
     expect(await scopeOf(code, "let")).toBe("storage.type.ts");
   });
 
+  it("colors field constraints", async () => {
+    const code = "boundary Account {\n  handle: string matches /^[a-z\\/]+$/u,\n  name?: Text<NFC> minLength 1 maxLength 40;\n  port: number in 1..65_535 // ports\n}\nconst x = 1;";
+    const all = await tokens(code);
+    const scope = (text: string) => all.find(([t]) => t === text)?.[1];
+    expect(scope("matches")).toBe("keyword.operator.constraint.seamscript");
+    expect(scope("/^[a-z\\/]+$/u")).toBe("string.regexp.ts");
+    expect(scope("minLength")).toBe("keyword.operator.constraint.seamscript");
+    expect(scope("40")).toBe("constant.numeric.decimal.ts");
+    expect(scope("in")).toBe("keyword.operator.constraint.seamscript");
+    expect(scope("..")).toBe("keyword.operator.range.seamscript");
+    expect(scope("65_535")).toBe("constant.numeric.decimal.ts");
+    expect(scope("name")).toBe("variable.object.property.ts");
+    expect(scope("Text")).toBe("entity.name.type.ts");
+    expect(scope(" ports")).toMatch(/comment/);
+    expect(scope("const")).toBe("storage.type.ts");
+  });
+
   it("leaves a variable named boundary alone", async () => {
     expect(await scopeOf("const boundary = 1; boundary.x;", "boundary")).not.toMatch(/seamscript/);
   });
 });
 
 describe("decode", () => {
+  it("colors from json, and leaves a variable named json alone", async () => {
+    expect(await scopeOf("const r = decode Order from json text;", "json")).toBe("keyword.operator.expression.json.seamscript");
+    expect(await scopeOf("const r = decode Order from json.body;", "json")).not.toBe("keyword.operator.expression.json.seamscript");
+    expect(await scopeOf("const r = decode Order from json as T;", "json")).not.toBe("keyword.operator.expression.json.seamscript");
+  });
+
   it("colors decode … from and the target as a type", async () => {
     const code = "const r = decode Order[] from await res.json();";
     expect(await scopeOf(code, "decode")).toBe("keyword.operator.expression.decode.seamscript");

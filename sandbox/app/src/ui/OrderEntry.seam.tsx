@@ -1,9 +1,10 @@
 import { type FormEvent, useEffect, useState } from "react";
+import { useFork } from "@seamscript/react";
 import type { SearchResult } from "../api.seam";
 import { fractionDigits, notional, price } from "../format.seam";
 import { describeProblem } from "../http.seam";
 import { placeOrder, searchInstruments } from "../orders.seam";
-import { useFork, useInstrument } from "./hooks.seam";
+import { useInstrument } from "./hooks.seam";
 
 /** The server's limits for a memo, checked here with the same Text (same Unicode version in production). */
 export const MEMO_MAX = 32;
@@ -22,7 +23,7 @@ export function OrderEntry({ instrumentId, onSelect }: { instrumentId: Int64 | n
 }
 
 function InstrumentSearch({ onSelect }: { onSelect(id: Int64): void }) {
-  const search = useFork(() => searchInstruments.fork());
+  const search = useFork(searchInstruments);
   const [input, setInput] = useState("");
   const [result, setResult] = useState<SearchResult | null>(null);
   const [error, setError] = useState<string | null>(null);

@@ -12,11 +12,31 @@ export interface SeamBoundaryDeclaration extends BaseNode {
   union: t.TSType | null;
 }
 
-/** `decode Type from argument` */
+/**
+ * A constraint after a boundary field's type, kept on its TSTypeAnnotation as
+ * `constraints`: `matches /re/`, `minLength N`, `maxLength N`, `in A..B`.
+ */
+export interface SeamConstraint extends BaseNode {
+  type: "SeamConstraint";
+  kind: "matches" | "minLength" | "maxLength" | "in";
+  /** matches */
+  pattern?: t.RegExpLiteral;
+  /** minLength, maxLength */
+  value?: number;
+  /** in: the bounds as written, without spaces (`-5`, `65_535`). */
+  min?: string;
+  max?: string;
+}
+
+/** A boundary field's annotation, with the constraints that follow its type. */
+export type FieldAnnotation = t.TSTypeAnnotation & { constraints?: SeamConstraint[] };
+
+/** `decode Type from argument`, or `decode Type from json argument` (json: true). */
 export interface SeamDecodeExpression extends BaseNode {
   type: "SeamDecodeExpression";
   typeAnnotation: t.TSType;
   argument: t.Expression;
+  json: boolean;
 }
 
 /** `latest async function name(...) { ... }` */
@@ -25,7 +45,7 @@ export interface SeamLatestDeclaration extends BaseNode {
   declaration: t.FunctionDeclaration;
 }
 
-export type SeamNode = SeamBoundaryDeclaration | SeamDecodeExpression | SeamLatestDeclaration;
+export type SeamNode = SeamBoundaryDeclaration | SeamDecodeExpression | SeamLatestDeclaration | SeamConstraint;
 export type AnyNode = t.Node | SeamNode;
 
 /** Positions are always present on nodes produced by the parser. */

@@ -14,11 +14,18 @@ import { decodedMappings, originalPositionFor, TraceMap } from "@jridgewell/trac
 // Loaded with require: importing TypeScript's CommonJS API as ESM makes Node
 // scan all of it for export names first, about 100 ms on every run.
 import ts = require("typescript");
-import { createChecker, type Finding } from "./checker.js";
+import { type CheckerOptions, createChecker, type Finding } from "./checker.js";
 import type { Diagnostic } from "./diagnostics.js";
 import { isSeamFile, RUNTIME_MODULE, type TransformResult, transform, type UnknownWrap } from "./transform.js";
 
-const { findSources, checkFlows } = createChecker(ts);
+// One checker per set of options; most projects use the defaults.
+const checkers = new Map<string, ReturnType<typeof createChecker>>();
+function checkerFor(options: CheckerOptions): ReturnType<typeof createChecker> {
+  const key = JSON.stringify(options);
+  let c = checkers.get(key);
+  if (c === undefined) checkers.set(key, (c = createChecker(ts, options)));
+  return c;
+}
 
 export interface SeamProgram {
   /** The final (second) program. */
@@ -86,8 +93,12 @@ function seamHost(host: ts.CompilerHost, files: SourceFiles, transformed: (fileN
 }
 
 export interface SeamProgramOptions {
-  /** Transform for production: every `.seam.ts` file imports `@seamscript/core`. */
+  /** The project's "seamscript" settings (readSeamConfig). */
+  checker?: CheckerOptions;
+  /** Transform for production: `.seam.ts` files that use Text import `@seamscript/core`. */
   production?: boolean;
+  /** With production, import `@seamscript/core/deferred` instead. */
+  deferCore?: boolean;
   /** Reuse work from earlier programs of the same project (a watch). */
   cache?: SeamCache;
 }
@@ -96,15 +107,16 @@ export function createSeamProgram(
   rootNames: readonly string[],
   options: ts.CompilerOptions,
   host: ts.CompilerHost = ts.createCompilerHost(options),
-  { production = false, cache }: SeamProgramOptions = {},
+  { production = false, deferCore = false, cache, checker: checkerOptions = {} }: SeamProgramOptions = {},
 ): SeamProgram {
-  // A transform depends only on the text, the wraps and production.
+  const { findSources, checkFlows } = checkerFor(checkerOptions);
+  // A transform depends only on the text, the wraps and the production options.
   const transformCached = (source: string, fileName: string, wraps: readonly UnknownWrap[] | undefined): TransformResult => {
-    if (cache === undefined) return transform(source, fileName, { wraps, production });
-    const key = `${production}:${JSON.stringify(wraps ?? [])}:${source}`;
+    if (cache === undefined) return transform(source, fileName, { wraps, production, deferCore });
+    const key = `${production}:${deferCore}:${JSON.stringify(wraps ?? [])}:${source}`;
     const kept = cache.transforms.get(`${fileName}\0${wraps === undefined ? 0 : 1}`);
     if (kept?.key === key) return kept.result;
-    const result = transform(source, fileName, { wraps, production });
+    const result = transform(source, fileName, { wraps, production, deferCore });
     cache.transforms.set(`${fileName}\0${wraps === undefined ? 0 : 1}`, { key, result });
     return result;
   };
@@ -140,7 +152,7 @@ export function createSeamProgram(
     if (r.syntaxError || sf === undefined) continue;
     const { sites, findings } = findSources(program1, sf);
     const map = new TraceMap(r.map as unknown as ConstructorParameters<typeof TraceMap>[0]);
-    pending.push(...findings.map((f) => fromFinding(f, fileName, sf, map)));
+    pending.push(...findings.filter((f) => !f.fixOnly).map((f) => fromFinding(f, fileName, sf, map)));
     const source = original(fileName)!;
     const mapped = sites.flatMap((site) => {
       const start = originalOffset(map, sf, source, site.start);
@@ -190,7 +202,7 @@ export function createSeamProgram(
         const sf = program.getSourceFile(fileName);
         if (r.syntaxError || sf === undefined) continue;
         const runtime = ts.resolveModuleName(RUNTIME_MODULE, fileName, options, finalHost).resolvedModule?.resolvedFileName;
-        for (const f of checkFlows(program, sf, runtime)) out.push(fromFinding(f, fileName, sf, mapOf(fileName, r)));
+        for (const f of checkFlows(program, sf, runtime)) if (!f.fixOnly) out.push(fromFinding(f, fileName, sf, mapOf(fileName, r)));
       }
       for (const d of ts.getPreEmitDiagnostics(program)) {
         const r = d.file && outputs.get(d.file.fileName);

@@ -26,6 +26,43 @@ describe("loading", () => {
   });
 });
 
+describe("deferred loading", () => {
+  it("does not hold up importers; Text waits for Text.ready", async () => {
+    const { runtime } = await fresh();
+    await import("../js/deferred.js");
+    // The importer runs before the core is ready.
+    expect(runtime.Text.status).toBe("loading");
+    expect(() => runtime.Text.nfc("é")).toThrow(runtime.CoreUnavailableError);
+    try {
+      runtime.Text.nfc("é");
+    } catch (e) {
+      expect((e as InstanceType<typeof runtime.CoreUnavailableError>).loading).toBe(true);
+      expect((e as Error).message).toMatch(/await Text\.ready/);
+    }
+    // Printable ASCII needs no Unicode data, so it works meanwhile.
+    expect(runtime.Text.length("abc" as never)).toBe(3);
+    await runtime.Text.ready;
+    expect(runtime.Text.status).toBe("core");
+    expect(runtime.Text.nfc("e\u0301")).toBe("\u00e9");
+    await expect(runtime.Text.ready).resolves.toBeUndefined();
+  });
+
+  it("settles Text.ready on a failed load too, and reports it", async () => {
+    const { runtime, load } = await fresh();
+    runtime.__coreLoading(load.install(new Uint8Array([0, 97, 115, 109, 9, 9])));
+    expect(runtime.Text.status).toBe("loading");
+    await runtime.Text.ready;
+    expect(runtime.Text.status).toBe("failed");
+    expect(() => runtime.Text.nfc("é")).toThrow(/could not be loaded/);
+  });
+
+  it("is ready at once when nothing is loading", async () => {
+    const { runtime } = await fresh();
+    await runtime.Text.ready;
+    expect(runtime.Text.status).toBe("host");
+  });
+});
+
 describe("the ABI", () => {
   it("handles inputs larger than the module's initial memory", async () => {
     const { runtime } = await fresh();
@@ -54,6 +91,10 @@ describe("the ABI", () => {
     await import("../js/index.js");
     expect(runtime.Text.nfc("\uFEFFa")).toBe("\uFEFFa");
     expect(runtime.Text.nfd("\uFEFF")).toBe("\uFEFF");
+    // A long result is read back by TextDecoder rather than String.fromCharCode.
+    const long = "e\u0301".repeat(1200);
+    expect(runtime.Text.nfc(`\uFEFF${long}`)).toBe(`\uFEFF${"\u00e9".repeat(1200)}`);
+    expect(runtime.Text.nfd(`\uFEFF${"\u00e9".repeat(1200)}`)).toBe(`\uFEFF${long}`);
   });
 
   it("replaces lone surrogates when constructing, as a UTF-8 based backend would", async () => {

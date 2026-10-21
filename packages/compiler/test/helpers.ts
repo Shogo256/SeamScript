@@ -1,6 +1,6 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { createSeamProgram, defaultCompilerOptions } from "../src/program.js";
+import { createSeamProgram, defaultCompilerOptions, type SeamProgramOptions } from "../src/program.js";
 
 // Projects are written inside the repository so that "@seamscript/runtime"
 // resolves through the workspace's node_modules.
@@ -24,9 +24,10 @@ export function cleanup(): void {
   for (const dir of created.splice(0)) rmSync(dir, { recursive: true, force: true });
 }
 
-export function check(files: Record<string, string>) {
-  const paths = project(files);
-  const p = createSeamProgram(paths, defaultCompilerOptions);
+export function check(files: Record<string, string>, options: SeamProgramOptions = {}) {
+  // Only source files are roots; others (a fake package under node_modules) are found by resolution.
+  const paths = project(files).filter((f) => !f.includes("/node_modules/") && /\.tsx?$/.test(f));
+  const p = createSeamProgram(paths, defaultCompilerOptions, undefined, options);
   return { paths, p, diagnostics: p.diagnostics() };
 }
 

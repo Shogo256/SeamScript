@@ -48,7 +48,7 @@ export function StatusBar({ core }: { core: CoreState }) {
         per frame p50 {times.p50.toFixed(3)} ms · p99 {times.p99.toFixed(3)} ms
       </span>
       <span className="core" data-testid="core">
-        {core.kind === "wasm" ? `Text: WASM core (Unicode ${core.unicode})` : "Text: browser ICU (development build)"}
+        {core.kind === "wasm" ? `Text: WASM core (Unicode ${core.unicode})` : core.kind === "loading" ? "Text: WASM core loading" : "Text: browser ICU (development build)"}
       </span>
     </header>
   );

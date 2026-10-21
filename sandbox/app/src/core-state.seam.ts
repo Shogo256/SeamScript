@@ -3,6 +3,8 @@ export type CoreState =
   | { readonly kind: "wasm"; readonly unicode: string }
   /** Development: Text runs on the browser's own ICU. */
   | { readonly kind: "host" }
+  /** Production with @seamscript/core/deferred, before Text.ready settles. */
+  | { readonly kind: "loading" }
   /** Production, but the core could not load (a CSP without 'wasm-unsafe-eval'). */
   | { readonly kind: "failed"; readonly message: string };
 
@@ -12,6 +14,8 @@ export function coreState(): CoreState {
       return { kind: "wasm", unicode: Text.unicodeVersion ?? "?" };
     case "host":
       return { kind: "host" };
+    case "loading":
+      return { kind: "loading" };
     case "failed":
       return {
         kind: "failed",

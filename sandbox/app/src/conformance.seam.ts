@@ -26,7 +26,9 @@ const fromHex = (hex: string) => String.fromCodePoint(...hex.trim().split(/\s+/)
 async function file(name: string): Promise<string> {
   const res = await fetch(`/ucd/${name}`);
   if (!res.ok) throw new Error(`/ucd/${name}: HTTP ${res.status}`);
-  return res.text();
+  const text = decode string from await res.text();
+  if (!text.ok) throw new Error(`/ucd/${name}: ${text.error.expected} expected`);
+  return text.value;
 }
 
 function graphemes(body: string): Report["grapheme"] {

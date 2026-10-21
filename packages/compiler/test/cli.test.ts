@@ -42,6 +42,10 @@ it("build --production imports the WASM core, and type-checks against it", () =>
   const outDir = join(dirname(file!), "..", "out-prod");
   expect(main(["build", "--production", "--outDir", outDir, file!])).toBe(0);
   expect(readFileSync(join(outDir, "order.seam.ts"), "utf8").split("\n")[0]).toBe('import "@seamscript/core";');
+  const deferred = join(dirname(file!), "..", "out-deferred");
+  expect(main(["build", "--production", "--defer-core", "--outDir", deferred, file!])).toBe(0);
+  expect(readFileSync(join(deferred, "order.seam.ts"), "utf8").split("\n")[0]).toBe('import "@seamscript/core/deferred";');
+  expect(main(["build", "--defer-core", "--outDir", deferred, file!])).toBe(2);
   vi.restoreAllMocks();
 });
 
@@ -70,15 +74,26 @@ it("help and version: exit 0, with the logo only on a terminal", () => {
 });
 
 it("vite plugin: imports the WASM core in builds, not on the dev server, unless told otherwise", () => {
-  const output = (command: "build" | "serve", core?: boolean) => {
+  const output = (command: "build" | "serve", core?: boolean | "deferred") => {
     const plugin = seamscript({ core });
     (plugin.configResolved as (c: object) => void)({ command, mode: "staging" });
-    return (plugin.transform as (code: string, id: string) => { code: string }).call({}, "fetch(u);", "/a.seam.ts").code;
+    return (plugin.transform as (code: string, id: string) => { code: string }).call({}, "Text.nfc(u);", "/a.seam.ts").code;
   };
   expect(output("build")).toContain('import "@seamscript/core";');
   expect(output("serve")).not.toContain("@seamscript/core");
   expect(output("build", false)).not.toContain("@seamscript/core");
   expect(output("serve", true)).toContain('import "@seamscript/core";');
+  expect(output("build", "deferred")).toContain('import "@seamscript/core/deferred";');
+});
+
+it("vite plugin: in a build, a plain module that uses Text imports the core too", () => {
+  const plugin = seamscript();
+  (plugin.configResolved as (c: object) => void)({ command: "build" });
+  const transform = plugin.transform as (code: string, id: string) => { code: string } | null;
+  const helper = '"use client";\nimport { Text } from "@seamscript/runtime";\nexport const n = (s: string) => Text.length(Text.nfc(s));\n';
+  expect(transform.call({}, helper, "/src/helper.ts")!.code).toBe(`"use client";\nimport "@seamscript/core";\n\nimport { Text } from "@seamscript/runtime";\nexport const n = (s: string) => Text.length(Text.nfc(s));\n`);
+  expect(transform.call({}, "export const x = 1;", "/src/plain.ts")).toBeNull();
+  expect(transform.call({}, 'import type { Text } from "@seamscript/runtime";\nexport type T = Text<"NFC">;', "/src/types.ts")).toBeNull();
 });
 
 it("vite plugin: compiles .seam.ts modules and leaves others", () => {

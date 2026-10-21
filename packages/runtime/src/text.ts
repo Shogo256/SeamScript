@@ -4,7 +4,7 @@ declare const form: unique symbol;
 
 export type TextForm = "NFC" | "NFD";
 
-export type TextStatus = "core" | "host" | "failed";
+export type TextStatus = "core" | "host" | "loading" | "failed";
 
 /**
  * String APIs that count UTF-16 code units. Calling any of them fails to type-check.
@@ -52,12 +52,17 @@ export interface TextCore {
 
 export class CoreUnavailableError extends Error {
   override readonly name = "CoreUnavailableError";
-  constructor(cause: unknown) {
+  /** `true` while `@seamscript/core/deferred` is still loading: awaiting `Text.ready` fixes it. */
+  readonly loading: boolean;
+  constructor(cause: unknown, loading = false) {
     super(
-      "@seamscript/core could not be loaded, so Text cannot be normalized or segmented " +
-        "deterministically. Check that the page's CSP allows 'wasm-unsafe-eval'.",
+      loading
+        ? "@seamscript/core is still loading; await Text.ready before the first Text operation."
+        : "@seamscript/core could not be loaded, so Text cannot be normalized or segmented " +
+            "deterministically. Check that the page's CSP allows 'wasm-unsafe-eval'.",
       { cause },
     );
+    this.loading = loading;
   }
 }
 
@@ -65,11 +70,25 @@ type Backend = Omit<TextCore, "unicodeVersion">;
 
 let core: TextCore | undefined;
 let coreFailure: { cause: unknown } | undefined;
+let coreLoading: Promise<void> | undefined;
 
 /** Called by `@seamscript/core` after its WASM module is ready. */
 export function __installCore(c: TextCore): void {
   core = c;
   coreFailure = undefined;
+}
+
+/**
+ * Called by `@seamscript/core/deferred` with the load it started, which settles
+ * once the core is installed or has failed. Until then Text operations throw
+ * CoreUnavailableError with `loading: true`.
+ */
+export function __coreLoading(done: Promise<void>): void {
+  if (core !== undefined) return;
+  coreLoading = done;
+  void done.then(() => {
+    if (coreLoading === done) coreLoading = undefined;
+  });
 }
 
 /**
@@ -146,8 +165,23 @@ const unavailable: Backend = {
   },
 };
 
+// While @seamscript/core/deferred loads: like a failed load, but awaiting Text.ready fixes it.
+const loading: Backend = {
+  normalize() {
+    throw new CoreUnavailableError(undefined, true);
+  },
+  graphemeCount(s) {
+    if (PRINTABLE_ASCII.test(s)) return s.length;
+    throw new CoreUnavailableError(undefined, true);
+  },
+  graphemeBoundaries(s, limit = Infinity) {
+    if (PRINTABLE_ASCII.test(s)) return asciiBoundaries(s, limit);
+    throw new CoreUnavailableError(undefined, true);
+  },
+};
+
 function backend(): Backend {
-  return core ?? (coreFailure !== undefined ? unavailable : fallback);
+  return core ?? (coreFailure !== undefined ? unavailable : coreLoading !== undefined ? loading : fallback);
 }
 
 const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
@@ -253,11 +287,20 @@ export const Text = {
   /**
    * Where Text's Unicode data comes from: `"core"` (the WASM core, as in a
    * production build), `"host"` (the environment's ICU, as in development), or
+   * `"loading"` (`@seamscript/core/deferred` is loading; await `Text.ready`), or
    * `"failed"` (the core could not load; Text operations throw
    * CoreUnavailableError). An app checks this at start-up to stop with a message
    * instead of failing on its first Text operation.
    */
   get status(): TextStatus {
-    return core !== undefined ? "core" : coreFailure !== undefined ? "failed" : "host";
+    return core !== undefined ? "core" : coreFailure !== undefined ? "failed" : coreLoading !== undefined ? "loading" : "host";
+  },
+
+  /**
+   * Settles once `@seamscript/core/deferred` has finished loading (status is then
+   * `"core"`, or `"failed"`); already settled when nothing is loading. Never rejects.
+   */
+  get ready(): Promise<void> {
+    return coreLoading ?? Promise.resolve();
   },
 };

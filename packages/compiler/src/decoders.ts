@@ -2,7 +2,7 @@
 // decoder expression (`__b.int64`, `__b.array(Order)`, ...). Only the forms the
 // spec allows are accepted; everything else is reported.
 import type * as t from "@babel/types";
-import { type AnyNode, end, type SeamBoundaryDeclaration, start } from "./ast.js";
+import { type AnyNode, end, type FieldAnnotation, type SeamBoundaryDeclaration, type SeamConstraint, start } from "./ast.js";
 import { Codes } from "./diagnostics.js";
 
 export interface BoundaryInfo {
@@ -88,7 +88,7 @@ export function decoderFor(node: t.TSType, scope: DecoderScope, site: Site): str
     case "TSLiteralType": {
       const lit = literalSource(node);
       if (lit !== undefined) return `__b.literal(${lit})`;
-      scope.report(node, Codes.boundaryFieldType, "Only string and number literal types can cross a boundary.");
+      scope.report(node, Codes.boundaryFieldType, "Only string and number literal types can cross a boundary; for a fixed boolean use `boolean`, for a template literal use `string`.");
       return undefined;
     }
     case "TSArrayType": {
@@ -104,7 +104,7 @@ export function decoderFor(node: t.TSType, scope: DecoderScope, site: Site): str
       return undefined;
     case "TSAnyKeyword":
     case "TSUnknownKeyword":
-      scope.report(node, Codes.boundaryFieldType, `${text(scope, node)} would let unchecked data through the boundary.`);
+      scope.report(node, Codes.boundaryFieldType, `${text(scope, node)} would let unchecked data through the boundary; give the field its actual type, or a boundary of its own for nested data.`);
       return undefined;
     case "TSTypeLiteral":
       scope.report(node, Codes.boundaryFieldType, "Nested object types need a boundary of their own; declare one and refer to it by name.");
@@ -167,12 +167,12 @@ function referenceDecoder(node: t.TSTypeReference, scope: DecoderScope, site: Si
   }
   if (builtin !== undefined && builtin in BUILTINS) return BUILTINS[builtin];
   if (builtin === "Unknown") {
-    scope.report(node, Codes.boundaryFieldType, "A boundary field cannot be Unknown: the boundary is where data gets checked.");
+    scope.report(node, Codes.boundaryFieldType, "A boundary field cannot be Unknown: the boundary is where data gets checked. Give the field its actual type, or a boundary of its own for nested data.");
     return undefined;
   }
   const ref = text(scope, node.typeName);
   if (name !== undefined && scope.otherTypes.has(name)) {
-    scope.report(node, Codes.notABoundary, `${name} is a type, not a boundary: only boundaries carry a decoder.`);
+    scope.report(node, Codes.notABoundary, `${name} is a type, not a boundary: only boundaries carry a decoder. Declare it with \`boundary ${name} { ... }\` instead of \`type\` or \`interface\`.`);
     return undefined;
   }
   if (site.kind === "decode") return ref;
@@ -180,6 +180,126 @@ function referenceDecoder(node: t.TSTypeReference, scope: DecoderScope, site: Si
   // Declared earlier in this file: already initialized. Otherwise (itself, later,
   // or imported and possibly in an import cycle) look it up when first used.
   return local !== undefined && local.index < site.ownerIndex ? ref : `__b.lazy(() => ${ref})`;
+}
+
+/** What a constraint can apply to. */
+type ValueKind = "string" | "text" | "number" | "int64" | "array" | "other";
+
+function valueKind(node: t.TSType, scope: DecoderScope): ValueKind {
+  switch (node.type) {
+    case "TSStringKeyword":
+      return "string";
+    case "TSNumberKeyword":
+      return "number";
+    case "TSArrayType":
+      return "array";
+    case "TSTypeReference": {
+      const builtin = scope.builtin(node.typeName);
+      return builtin === "Text" ? "text" : builtin === "Int64" ? "int64" : "other";
+    }
+    default:
+      return "other";
+  }
+}
+
+const RULES: Record<SeamConstraint["kind"], { kinds: readonly ValueKind[]; message: string }> = {
+  matches: { kinds: ["string", "text"], message: "`matches` applies to string and Text<NFC|NFD> fields." },
+  minLength: {
+    kinds: ["text", "array"],
+    message: "`minLength` applies to Text fields (grapheme clusters) and arrays (elements); for a length in characters, declare the field Text<NFC>.",
+  },
+  maxLength: {
+    kinds: ["text", "array"],
+    message: "`maxLength` applies to Text fields (grapheme clusters) and arrays (elements); for a length in characters, declare the field Text<NFC>.",
+  },
+  in: { kinds: ["number", "int64"], message: "`in A..B` applies to number and Int64 fields." },
+};
+
+/**
+ * The decoder of a field whose type is followed by constraints. On `T | null`
+ * they constrain T; on an optional field, the value when present.
+ */
+function constrainedDecoder(type: t.TSType, constraints: readonly SeamConstraint[], scope: DecoderScope, site: Site): string | undefined {
+  const members = unionMembers(type);
+  const rest = members.filter((m) => m.type !== "TSNullKeyword");
+  if (rest.length === 1 && members.length > 1) {
+    const inner = constrainedDecoder(rest[0]!, constraints, scope, site);
+    return inner && `__b.nullable(${inner})`;
+  }
+  const base = decoderFor(type, scope, site);
+  if (base === undefined) return undefined;
+  const kind = valueKind(type, scope);
+  const seen = new Set<string>();
+  let ok = true;
+  const problem = (node: AnyNode, message: string) => {
+    scope.report(node, Codes.boundaryConstraint, message);
+    ok = false;
+  };
+  let pattern: string | undefined;
+  let min: number | undefined;
+  let max: number | undefined;
+  let range: [string, string] | undefined;
+  for (const c of constraints) {
+    if (seen.has(c.kind)) {
+      problem(c, `\`${c.kind}\` is given twice; keep one.`);
+      continue;
+    }
+    seen.add(c.kind);
+    if (!RULES[c.kind].kinds.includes(kind)) {
+      problem(c, `${RULES[c.kind].message} \`${text(scope, type)}\` takes no \`${c.kind}\`.`);
+      continue;
+    }
+    if (c.kind === "matches") {
+      const { pattern: source, flags } = c.pattern!;
+      if (/[gy]/.test(flags)) {
+        problem(c.pattern!, "The g and y flags make a pattern's test() depend on the previous value; remove them.");
+        continue;
+      }
+      try {
+        new RegExp(source, flags);
+      } catch (e) {
+        problem(c.pattern!, `This pattern is not a valid regular expression: ${(e as Error).message}`);
+        continue;
+      }
+      pattern = text(scope, c.pattern!);
+    } else if (c.kind === "minLength" || c.kind === "maxLength") {
+      if (!Number.isSafeInteger(c.value) || c.value! < 0) {
+        problem(c, `\`${c.kind}\` takes a whole number of 0 or more.`);
+        continue;
+      }
+      if (c.kind === "minLength") min = c.value;
+      else max = c.value;
+    } else {
+      const bounds = [c.min!, c.max!].map((b) => b.replace(/_/g, ""));
+      if (kind === "int64") {
+        if (bounds.some((b) => b.includes("."))) {
+          problem(c, "An Int64 range takes whole numbers: `in 0..100`.");
+          continue;
+        }
+        if (BigInt(bounds[0]!) > BigInt(bounds[1]!)) {
+          problem(c, `The range is empty: ${bounds[0]} is above ${bounds[1]}. Write the smaller bound first.`);
+          continue;
+        }
+        range = [`${BigInt(bounds[0]!)}n`, `${BigInt(bounds[1]!)}n`];
+      } else {
+        const [lo, hi] = bounds.map(Number) as [number, number];
+        if (lo > hi) {
+          problem(c, `The range is empty: ${lo} is above ${hi}. Write the smaller bound first.`);
+          continue;
+        }
+        range = [String(lo), String(hi)];
+      }
+    }
+  }
+  if (min !== undefined && max !== undefined && min > max) {
+    problem(constraints.find((c) => c.kind === "minLength")!, `minLength ${min} is above maxLength ${max}, so no value fits.`);
+  }
+  if (!ok) return undefined;
+  let d = base;
+  if (pattern !== undefined) d = `__b.matches(${d}, ${pattern})`;
+  if (min !== undefined || max !== undefined) d = max === undefined ? `__b.length(${d}, ${min})` : `__b.length(${d}, ${min ?? 0}, ${max})`;
+  if (range !== undefined) d = `__b.range(${d}, ${range[0]}, ${range[1]})`;
+  return d;
 }
 
 /** `__b.object<Name>({ ... })` for an object boundary. */
@@ -200,17 +320,19 @@ export function objectDecoder(
     if (member.key.type === "Identifier") key = member.key.name;
     else if (member.key.type === "StringLiteral") key = JSON.stringify(member.key.value);
     else {
-      scope.report(member.key, Codes.boundaryMember, "Field names must be identifiers or string literals.");
+      scope.report(member.key, Codes.boundaryMember, "Field names must be identifiers or string literals; quote a computed or numeric name (`\"2fa\": boolean`).");
       ok = false;
       continue;
     }
-    const type = member.typeAnnotation?.typeAnnotation;
+    const annotation = member.typeAnnotation as FieldAnnotation | null | undefined;
+    const type = annotation?.typeAnnotation;
     if (type === undefined) {
-      scope.report(member, Codes.boundaryMember, "A boundary field needs a type.");
+      scope.report(member, Codes.boundaryMember, "A boundary field needs a type: `name: Type`.");
       ok = false;
       continue;
     }
-    const d = decoderFor(type, scope, { kind: "field", ownerIndex });
+    const site: Site = { kind: "field", ownerIndex };
+    const d = annotation?.constraints ? constrainedDecoder(type, annotation.constraints, scope, site) : decoderFor(type, scope, site);
     if (d === undefined) {
       ok = false;
       continue;
@@ -251,7 +373,7 @@ export function unionBoundaryDecoder(
       continue;
     }
     if (name !== undefined && scope.otherTypes.has(name)) {
-      scope.report(m, Codes.notABoundary, `${name} is a type, not a boundary: only boundaries carry a decoder.`);
+      scope.report(m, Codes.notABoundary, `${name} is a type, not a boundary: only boundaries carry a decoder. Declare it with \`boundary ${name} { ... }\` instead of \`type\` or \`interface\`.`);
       ok = false;
       continue;
     }

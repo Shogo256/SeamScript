@@ -33,22 +33,28 @@
           "name": "keyword.operator.assignment.ts"
         },
         {
+          "include": "#boundary-body"
+        },
+        {
           "include": "source.ts#type"
         }
       ]
     },
     "decode": {
-      "comment": "decode Type from value: the target is a type, and `from` ends it. A parenthesized target counts only when `from` follows on the line, as in the parser (otherwise it is a call).",
+      "comment": "decode Type from value: the target is a type, and `from` ends it. A parenthesized target counts only when `from` follows on the line, as in the parser (otherwise it is a call). `from json` marks JSON text, again as in the parser: only when a name or a string follows.",
       "begin": "(?<![\\w$.])(decode)(?=\\s+(?:(?!(?:as|satisfies|of|from)(?![\\w$]))[\\w$\"'\\[{-]|\\((?=.*(?<![\\w$.])from(?![\\w$]))))",
       "beginCaptures": {
         "1": {
           "name": "keyword.operator.expression.decode.seamscript"
         }
       },
-      "end": "(?<![\\w$.])(from)(?![\\w$])|$",
+      "end": "(?<![\\w$.])(from)(?![\\w$])(?:\\s+(json)(?=\\s+(?:(?!(?:as|satisfies|of|in|instanceof)(?![\\w$]))[\\w$]|[\"'])))?|$",
       "endCaptures": {
         "1": {
           "name": "keyword.operator.expression.from.seamscript"
+        },
+        "2": {
+          "name": "keyword.operator.expression.json.seamscript"
         }
       },
       "patterns": [
@@ -68,6 +74,105 @@
           "name": "storage.modifier.latest.seamscript"
         }
       }
+    },
+    "boundary-body": {
+      "comment": "The fields of an object boundary, whose types may be followed by constraints.",
+      "begin": "\\{",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.definition.block.ts"
+        }
+      },
+      "end": "\\}",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.block.ts"
+        }
+      },
+      "name": "meta.object.type.ts",
+      "patterns": [
+        {
+          "include": "source.ts#comment"
+        },
+        {
+          "include": "#boundary-field"
+        },
+        {
+          "include": "source.ts#punctuation-comma"
+        },
+        {
+          "include": "source.ts#punctuation-semicolon"
+        }
+      ]
+    },
+    "boundary-field": {
+      "comment": "name?: Type constraints",
+      "begin": "([A-Za-z_$][\\w$]*|\"(?:[^\"\\\\]|\\\\.)*\"|'(?:[^'\\\\]|\\\\.)*')\\s*(\\?)?\\s*(:)",
+      "beginCaptures": {
+        "1": {
+          "name": "variable.object.property.ts"
+        },
+        "2": {
+          "name": "keyword.operator.optional.ts"
+        },
+        "3": {
+          "name": "keyword.operator.type.annotation.ts"
+        }
+      },
+      "end": "(?=[,;}]|//|/\\*)|$",
+      "name": "meta.type.annotation.ts",
+      "patterns": [
+        {
+          "include": "#constraint"
+        },
+        {
+          "include": "source.ts#type"
+        }
+      ]
+    },
+    "constraint": {
+      "comment": "matches /re/, minLength N, maxLength N, in A..B",
+      "patterns": [
+        {
+          "match": "(?<![\\w$.])(matches)\\s+(/(?:[^/\\\\\\[\\n]|\\\\.|\\[(?:[^\\]\\\\\\n]|\\\\.)*\\])+/[dgimsuvy]*)",
+          "captures": {
+            "1": {
+              "name": "keyword.operator.constraint.seamscript"
+            },
+            "2": {
+              "name": "string.regexp.ts"
+            }
+          }
+        },
+        {
+          "match": "(?<![\\w$.])(minLength|maxLength)\\s+(\\d[\\d_]*)",
+          "captures": {
+            "1": {
+              "name": "keyword.operator.constraint.seamscript"
+            },
+            "2": {
+              "name": "constant.numeric.decimal.ts"
+            }
+          }
+        },
+        {
+          "match": "(?<![\\w$.])(in)\\s+(-?\\s*\\d[\\d_]*(?:\\.\\d[\\d_]*)?)\\s*(\\.\\.)\\s*(-?\\s*\\d[\\d_]*(?:\\.\\d[\\d_]*)?)",
+          "captures": {
+            "1": {
+              "name": "keyword.operator.constraint.seamscript"
+            },
+            "2": {
+              "name": "constant.numeric.decimal.ts"
+            },
+            "3": {
+              "name": "keyword.operator.range.seamscript"
+            },
+            "4": {
+              "name": "constant.numeric.decimal.ts"
+            }
+          }
+        }
+      ]
     }
   }
 }

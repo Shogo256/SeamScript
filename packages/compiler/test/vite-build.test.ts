@@ -29,3 +29,42 @@ it("a production build runs Text on the WASM core", async () => {
   const { report } = await import(pathToFileURL(join(outDir, "main.js")).href);
   expect(report).toEqual({ deterministic: true, unicodeVersion: "17.0.0", family: 1 });
 });
+
+async function bundle(files: Record<string, string>, core?: boolean | "deferred") {
+  const paths = project(files);
+  const entry = paths[0]!;
+  const outDir = join(dirname(entry), "dist");
+  await build({
+    root: dirname(entry),
+    logLevel: "silent",
+    configFile: false,
+    plugins: [seamscript({ core })],
+    build: { outDir, target: "es2022", minify: false, lib: { entry, formats: ["es"], fileName: "main" } },
+  });
+  return { outDir, module: await import(pathToFileURL(join(outDir, "main.js")).href) };
+}
+
+it("with core: 'deferred', the app runs at once and Text works after Text.ready", async () => {
+  const { module } = await bundle(
+    {
+      "main.seam.ts":
+        "export const before = Text.status;\n" +
+        "export const report = Text.ready.then(() => ({ status: Text.status, family: Text.length(Text.nfc('👨‍👩‍👧‍👦')) }));\n",
+    },
+    "deferred",
+  );
+  expect(module.before).toBe("loading");
+  expect(await module.report).toEqual({ status: "core", family: 1 });
+});
+
+it("an app that does not use Text at run time leaves the core out of the bundle", async () => {
+  const { outDir, module } = await bundle({
+    "main.seam.ts": "boundary P { id: Int64, memo: string }\nexport const r = decode P from json '{\"id\": 1, \"memo\": \"x\"}';\n",
+  });
+  expect(module.r).toEqual({ ok: true, value: { id: 1n, memo: "x" } });
+  const { readFileSync } = await import("node:fs");
+  // "\0asm", the start of every WebAssembly module, in base64.
+  expect(readFileSync(join(outDir, "main.js"), "utf8")).not.toContain("AGFzbQ");
+  const withText = await bundle({ "main.seam.ts": "export const n = Text.length(Text.nfc('x'));\n" });
+  expect(readFileSync(join(withText.outDir, "main.js"), "utf8")).toContain("AGFzbQ");
+});

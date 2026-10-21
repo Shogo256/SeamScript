@@ -100,6 +100,13 @@ describe("ways out of Unknown", () => {
     ["const q: unknown = Math.random() ? v : 1;", "SEAM2001"],
     ["(function <T>(x: T): unknown { return x; })(v);", "SEAM2002"],
     ['Reflect.get(v, "a");', "SEAM2002"],
+    // typeof narrows the Unknown brand to never, which fits every type.
+    ['if (typeof v === "string") { const s: string = v; }', "SEAM2001"],
+    ['if (typeof v === "string") { const d: Decimal = v; }', "SEAM2001"],
+    ['if (typeof v === "bigint") { const i: Int64 = v; }', "SEAM2001"],
+    ['switch (typeof v) { case "number": { const n: number = v; } }', "SEAM2001"],
+    ['if (typeof v === "string") console.log(v);', "SEAM2001"],
+    ['if (typeof v === "string") v as string;', "SEAM2001"],
   ])("%s", (body, code) => {
     expect(at5(body).filter(([, c]) => c.startsWith("SEAM"))).toEqual([[5, code]]);
   });
@@ -125,6 +132,38 @@ describe("ways out of Unknown", () => {
   ])("allows %s", (body) => {
     expect(at5(body).filter(([, c]) => c.startsWith("SEAM"))).toEqual([]);
   });
+});
+
+it("decode from json takes JSON text from a source in one step", () => {
+  const source = `boundary P { a: string }
+export function f(s: string) {
+  const fromStorage = decode P from json localStorage.getItem("k");
+  const fromString = decode P[] from json s;
+  if (fromStorage.ok && fromString.ok) return [fromStorage.value.a, fromString.value[0]?.a];
+  return null;
+}
+`;
+  expect(codesByLine(source)).toEqual([]);
+});
+
+it("decode keeps the boundary types, brands included", () => {
+  // Boundaries whose fields all encode to strings: the decoded type must still be
+  // the boundary's (Text, Decimal), not the encoded shape.
+  const source = `boundary Memo { memo: Text<NFC> }
+boundary Item { name: Text<NFC>, price: Decimal, at: Zoned }
+boundary Cart { items: Item[], note: Memo | null }
+export function f(v: Unknown) {
+  const m = decode Memo from v;
+  const c = decode Cart from v;
+  const t = decode Text<NFC>[] from v;
+  if (m.ok && c.ok && t.ok) {
+    const x: [Memo, Cart, Text<NFC>[]] = [m.value, c.value, t.value];
+    return x;
+  }
+  return null;
+}
+`;
+  expect(codesByLine(source)).toEqual([]);
 });
 
 describe("Text and JSON.stringify", () => {

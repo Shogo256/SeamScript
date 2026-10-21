@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   __b,
   __decode,
+  __decodeJson,
   type Decimal,
   type Decoder,
   EncodeRangeError,
@@ -142,6 +143,25 @@ describe("object", () => {
     };
     const r = __decode(Order, input);
     expect(r.ok === false && r.error).toMatchObject({ path: ["total"], actual: "unreadable" });
+  });
+});
+
+describe("decodeJson", () => {
+  it("parses and decodes in one step", () => {
+    expect(__decodeJson(__b.array(__b.int64), "[1, \"2\"]")).toEqual({ ok: true, value: [1n, 2n] });
+    expect(Order.decodeJson(JSON.stringify(valid))).toMatchObject({ ok: true, value: { id: 1n } });
+  });
+
+  it("reports malformed JSON and non-strings as decode errors, without echoing the input", () => {
+    expect(__decodeJson(__b.string, "{secret")).toEqual({
+      ok: false,
+      error: { kind: "decode", path: [], expected: "JSON", actual: "malformed JSON" },
+    });
+    expect(__decodeJson(__b.string, null)).toEqual({ ok: false, error: { kind: "decode", path: [], expected: "JSON text", actual: "null" } });
+  });
+
+  it("reports the decoded value's errors with their paths", () => {
+    expect(Order.decodeJson(JSON.stringify({ ...valid, id: "x" }))).toMatchObject({ ok: false, error: { path: ["id"], expected: "int64" } });
   });
 });
 
@@ -317,5 +337,67 @@ describe("encode", () => {
     expect(caught).toBeInstanceOf(RangeError);
     expect((caught as EncodeRangeError).path).toEqual(["parent", "id"]);
     expect((caught as EncodeRangeError).message).toBe('Int64 out of range at ["parent","id"]');
+  });
+});
+
+describe("constraints", () => {
+  type Account = { handle: string; name: Text<"NFC">; port: number; quota: Int64; tags: string[]; nick: Text<"NFC"> | null };
+  const Account: ObjectDecoder<Account> = __b.object<Account>({
+    handle: __b.matches(__b.string, /^[a-z][a-z0-9_]*$/),
+    name: __b.length(__b.matches(__b.text("NFC"), /\S/), 1, 5),
+    port: __b.range(__b.number, 1, 65535),
+    quota: __b.range(__b.int64, 0n, 1_000_000_000_000n),
+    tags: __b.length(__b.array(__b.string), 0, 2),
+    nick: __b.nullable(__b.length(__b.text("NFC"), 1)),
+  });
+  const good = { handle: "ada_1", name: "Ada", port: 443, quota: "5", tags: ["x"], nick: null };
+  const failure = (patch: object) => {
+    const r = Account.decode({ ...good, ...patch });
+    return r.ok ? undefined : r.error;
+  };
+
+  it("accepts values inside every constraint", () => {
+    expect(Account.decode(good)).toEqual({ ok: true, value: { ...good, quota: 5n } });
+    expect(Account.decode({ ...good, port: 65535, tags: [], nick: "x" }).ok).toBe(true);
+  });
+
+  it("reports the field, the constraint and what was wrong, never the value", () => {
+    expect(failure({ handle: "Ada" })).toEqual({ kind: "decode", path: ["handle"], expected: "string matching /^[a-z][a-z0-9_]*$/", actual: "string (no match)" });
+    expect(failure({ port: 0 })).toEqual({ kind: "decode", path: ["port"], expected: "number in 1..65535", actual: "number (out of range)" });
+    expect(failure({ quota: "-1" })).toMatchObject({ path: ["quota"], expected: "int64 in 0..1000000000000", actual: "int64 (out of range)" });
+    expect(failure({ tags: ["a", "b", "c"] })).toMatchObject({ path: ["tags"], expected: "string[] of length 2 or less", actual: "length 3" });
+    expect(failure({ nick: "" })).toMatchObject({ path: ["nick"], expected: "text of length 1 or more | null", actual: "length 0" });
+  });
+
+  it("measures Text in grapheme clusters, after normalization", () => {
+    // Five clusters, nine code units: a family emoji, e + combining acute (NFC: é), and three letters.
+    expect(failure({ name: "\u{1F468}‍\u{1F469}‍\u{1F467}éabc" })).toBeUndefined();
+    expect(failure({ name: "abcdef" })).toMatchObject({ expected: "text matching /\\S/ of length 1..5", actual: "length 6" });
+    // The whole field's expectation, whichever of its constraints failed.
+    expect(failure({ name: "   " })).toMatchObject({ expected: "text matching /\\S/ of length 1..5", actual: "text (no match)" });
+  });
+
+  it("reports a type mismatch with the constrained expectation", () => {
+    expect(failure({ port: "443" })).toMatchObject({ expected: "number in 1..65535", actual: "string" });
+    expect(failure({ nick: 3 })).toMatchObject({ expected: "text of length 1 or more | null", actual: "number" });
+  });
+
+  it("ignores a pattern's global and sticky flags, which would make test() stateful", () => {
+    const d = __b.matches(__b.string, /a/gy);
+    expect([d.decode("a").ok, d.decode("a").ok, d.decode("a").ok]).toEqual([true, true, true]);
+  });
+
+  it("refuses to encode a value that would not decode again", () => {
+    const value = { ...good, name: "Ada" as Text<"NFC">, quota: 5n };
+    expect(() => Account.encode({ ...value, port: 70000 })).toThrow(EncodeRangeError);
+    let caught: unknown;
+    try {
+      Account.encode({ ...value, tags: ["a", "b", "c"] });
+    } catch (e) {
+      caught = e;
+    }
+    expect((caught as EncodeRangeError).path).toEqual(["tags"]);
+    expect((caught as Error).message).toBe('Expected string[] of length 2 or less, got length 3 at ["tags"]');
+    expect(Account.encode(value)).toEqual({ ...good, quota: "5" });
   });
 });
