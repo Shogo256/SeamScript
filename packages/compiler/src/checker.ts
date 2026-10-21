@@ -333,7 +333,10 @@ export function createChecker(ts: typeof import("typescript")): Checker {
       if (!absorbs(source, target)) return false;
       // When TypeScript rejects the assignment itself, its error is enough.
       if (checker.isTypeAssignableTo(source, target)) {
-        report(expr, Codes.unknownFlow, `Unknown data cannot flow into ${show(target)} here; decode it first (\`decode T from ...\`).`);
+        // The lib's Response would let json() escape as any: the usual cause is a
+        // variable typed for fetch's result, so say what to write instead.
+        const hint = show(target) === "Response" ? " `fetch` returns a SeamResponse, whose json() stays Unknown: type the variable `SeamResponse`." : "";
+        report(expr, Codes.unknownFlow, `Unknown data cannot flow into ${show(target)} here; decode it first (\`decode T from ...\`).${hint}`);
       }
       return true;
     };

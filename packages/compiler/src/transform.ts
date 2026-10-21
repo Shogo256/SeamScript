@@ -25,7 +25,8 @@ export const CORE_MODULE = "@seamscript/core";
 
 /** Runtime names a `.seam.ts` file may use without importing them (when it does not bind them itself). */
 const AMBIENT_VALUES = ["Decimal", "Int64", "Text", "Unknown", "Zoned", "fetch"];
-const AMBIENT_TYPES = ["DecodeError", "Err", "Ok", "Result", "Stale"];
+// SeamResponse is what the ambient `fetch` returns, so that a variable for it can be typed.
+const AMBIENT_TYPES = ["DecodeError", "Err", "Ok", "Result", "SeamResponse", "Stale"];
 
 /**
  * An expression to mark as Unknown, found by the checker's first pass. Offsets

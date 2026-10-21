@@ -239,6 +239,11 @@ In development builds the compiler doesn't import `@seamscript/core`, so during 
 - Decimal division: added (see "Decisions on missing features").
 - **Text performance**: the weaknesses the benchmarks found (`Text.nfc` 11–36 times slower than native, `Text.slice(t, 0, n)` on 10KB 14–36 times slower than Intl, and slowness in Firefox) were fixed (see "Speed improvement decisions"). What remains is that `Text.nfc` on input containing characters that NFC can change (Khmer, Latin with combining characters, and so on) takes 2.3–4.7 times as long as native. A JS-side quick check that also looks at combining classes would narrow the gap, but the table would grow (not started).
 
+### From the first app outside this repository (Cairn's phone screen)
+
+- **`SeamResponse` is ambient, like `fetch`.** `let res: Response; res = await fetch(...)` (the usual shape when the fetch sits in a `try`) was rejected with SEAM2001 "cannot flow into Response", which says nothing about what to write: the lib's `Response` would let `json()` escape as `any`, so the rejection is right, but the type to use, `SeamResponse`, had to be imported by hand. It is now imported automatically, and SEAM2001 into `Response` says to type the variable `SeamResponse`.
+- **Linking the packages from a checkout needs `@seamscript/parser` listed too** (README, Getting started), until the packages are on npm.
+
 ### Known limitations of the compiler
 
 - The first program is built only to find sources. Checking takes 1.36 times as long as plain tsc (see "Speed improvement decisions").

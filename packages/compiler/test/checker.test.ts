@@ -46,6 +46,15 @@ describe("sources", () => {
     expect(flowsOut("await (await fetch('/x')).json()")).toEqual([[3, "TS2322"]]); // the runtime's fetch
   });
 
+  it("points a Response-typed variable for fetch's result at SeamResponse", () => {
+    const body = (type: string) => `export async function f() {\n  let res: ${type};\n  res = await fetch("/x");\n  return res;\n}\n`;
+    const [d] = check({ "a.seam.ts": body("Response") }).diagnostics;
+    expect(d?.code).toBe("SEAM2001");
+    expect(d?.message).toContain("type the variable `SeamResponse`");
+    // SeamResponse needs no import, like fetch itself.
+    expect(codesByLine(body("SeamResponse"))).toEqual([]);
+  });
+
   it("lets every source be decoded", () => {
     const body = [
       "  decode P from JSON.parse(s);",

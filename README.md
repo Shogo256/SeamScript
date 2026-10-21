@@ -60,6 +60,19 @@ nix-shell --run 'yarn install --frozen-lockfile && yarn build'
 
 The toolchain (Node 24, TypeScript 5.9, Rust with wasm32) is defined in `shell.nix`. Without nix, you need Node 20 or later, yarn 1, and Rust with `rustup target add wasm32-unknown-unknown` already run.
 
+Until then, a project outside this repository links the built packages from a checkout. List `@seamscript/parser` too: the compiler depends on it, and npm would otherwise look for it on the registry.
+
+```json
+"dependencies": {
+  "@seamscript/core": "file:../SeamScript/packages/core",
+  "@seamscript/runtime": "file:../SeamScript/packages/runtime"
+},
+"devDependencies": {
+  "@seamscript/compiler": "file:../SeamScript/packages/compiler",
+  "@seamscript/parser": "file:../SeamScript/packages/parser"
+}
+```
+
 Once the packages are published, you install them like this:
 
 ```bash
