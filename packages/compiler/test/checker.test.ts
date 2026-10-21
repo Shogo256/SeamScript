@@ -55,6 +55,24 @@ describe("sources", () => {
     expect(codesByLine(body("SeamResponse"))).toEqual([]);
   });
 
+  it("keeps the brands of an object boundary's fields through decode", () => {
+    // Branded strings only: with an Int64 field the brand-stripped candidate is
+    // no supertype, so the bug hid behind it.
+    const source = `boundary Mark { number: string, at: Zoned, memo: Text<NFC>, total: Decimal }
+export function f(raw: Unknown) {
+  const one = decode Mark from raw;
+  const all = decode Mark[] from raw;
+  if (!one.ok || !all.ok) return null;
+  const at: Zoned = one.value.at;
+  const memo: Text<NFC> = one.value.memo;
+  const total: Decimal = one.value.total;
+  const first: Zoned = all.value[0]!.at;
+  return [at, memo, total, first];
+}
+`;
+    expect(codesByLine(source)).toEqual([]);
+  });
+
   it("lets every source be decoded", () => {
     const body = [
       "  decode P from JSON.parse(s);",

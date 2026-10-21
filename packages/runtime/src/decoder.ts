@@ -44,12 +44,20 @@ export interface Decoder<T> {
   readonly expected: string;
   /** Never throws for bad data: failures come back as `{ ok: false }`. */
   decode(input: unknown): Result<T, DecodeError>;
-  /** Throws `EncodeRangeError` if an Int64 is outside the 64-bit range. */
-  encode(value: T): Encoded<T>;
+  /**
+   * Throws `EncodeRangeError` if an Int64 is outside the 64-bit range.
+   *
+   * `NoInfer`: `Encoded<T>` of an object is a homomorphic mapped type, which
+   * TypeScript would reverse-infer `T` from as well. That candidate has every
+   * brand stripped (`at: string` for `at: Zoned`), and being the wider one it
+   * won: `decode Order from v` and `__b.array(Order)` lost Zoned, Int64, Text
+   * and Decimal in their fields. `T` is inferred from `decode` alone.
+   */
+  encode(value: NoInfer<T>): Encoded<NoInfer<T>>;
   readonly [RUN]: (input: unknown, depth: number) => Step<T>;
   // Method syntax keeps Decoder covariant in practice, so a Decoder<Order> can be
   // stored where a Decoder<unknown> is expected (lists of decoders, union members).
-  [WRITE](value: T): unknown;
+  [WRITE](value: NoInfer<T>): unknown;
 }
 
 export interface OptionalDecoder<T> extends Decoder<T | undefined> {
