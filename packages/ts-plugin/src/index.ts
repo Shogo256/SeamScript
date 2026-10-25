@@ -120,7 +120,7 @@ const plugin = createLanguageServicePlugin((tsModule, info) => {
         tsModule.resolveModuleName(RUNTIME_MODULE, fileName, info.project.getCompilerOptions(), tsModule.sys).resolvedModule?.resolvedFileName;
 
       const sameWraps = (a: readonly UnknownWrap[], b: readonly UnknownWrap[]) =>
-        a.length === b.length && a.every((w, i) => w.start === b[i]!.start && w.end === b[i]!.end && w.async === b[i]!.async);
+        a.length === b.length && a.every((w, i) => w.start === b[i]!.start && w.end === b[i]!.end && w.async === b[i]!.async && w.each === b[i]!.each);
 
       function semantic(fileName: string, round = 0): ts.Diagnostic[] {
         // First, as it brings the program and the file's virtual code up to date.
@@ -139,7 +139,7 @@ const plugin = createLanguageServicePlugin((tsModule, info) => {
         const found = sites.flatMap((s) => {
           const start = toSourceExact(code, s.start - lead);
           const last = toSourceExact(code, s.end - 1 - lead);
-          return start === undefined || last === undefined ? [] : [{ start, end: last + 1, async: s.async }];
+          return start === undefined || last === undefined ? [] : [{ start, end: last + 1, async: s.async, ...(s.each ? { each: true as const } : {}) }];
         });
         found.sort((a, b) => a.start - b.start || a.end - b.end);
         if (!sameWraps(found, code.wraps) && round === 0) {

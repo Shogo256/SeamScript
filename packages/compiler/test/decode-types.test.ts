@@ -23,6 +23,10 @@ const FIELDS: [string, string, string][] = [
   ['"a" | "b"', '"a" | "b"', '"a" | "b"'],
   ["1 | 2", "1 | 2", "1 | 2"],
   ["null", "null", "null"],
+  ["Bytes", "Bytes", "Uint8Array<ArrayBuffer>"],
+  ["Pcm<Int16, 16000, 1>", 'Pcm<"int16", 16000, 1>', "ArrayBuffer"],
+  ["Pcm<Float32, 48000, 2>", 'Pcm<"float32", 48000, 2>', "ArrayBuffer"],
+  ["Planar<Float32, 2>", 'Planar<"float32", 2>', "Float32Array[]"],
 ];
 
 const paren = (t: string) => (t.includes("|") ? `(${t})` : t);
@@ -123,9 +127,9 @@ it("decode produces exactly the boundary's types, for every shape and field type
   // Report each failure with the case it belongs to.
   const failures = diagnostics.map((d) => `${d.file.split("/").pop()}:${d.line} ${d.code} ${readFileSync(d.file, "utf8").split("\n")[d.line - 1]?.trim()}`);
   expect(failures).toEqual([]);
-  // The suite is only a guard if it has cases: 11 field types, about 20 cases each.
+  // The suite is only a guard if it has cases: 15 field types, about 20 cases each.
   const cases = Object.values(files as Record<string, string>).join("\n").match(/same</g)!.length;
-  expect(cases).toBeGreaterThan(200);
+  expect(cases).toBeGreaterThan(290);
 });
 
 it("a plain .ts file sees the same types through an import", () => {

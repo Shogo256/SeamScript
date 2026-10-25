@@ -5,7 +5,7 @@
   "description": "End-to-end tests of the sandbox app in Chromium, Firefox and WebKit, against the pseudo backend with faults",
   "type": "module",
   "scripts": {
-    "test": "yarn --cwd ../app build && yarn --cwd ../app-ts build && playwright test"
+    "test": "yarn --cwd ../app build && yarn --cwd ../app-ts build && yarn --cwd ../voice build && playwright test"
   },
   "devDependencies": {
     "@playwright/test": "1.61.1",

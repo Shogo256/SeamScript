@@ -24,6 +24,7 @@ export const Codes = {
   boundaryConstraint: "SEAM1107",
   decodeTarget: "SEAM1201",
   textForm: "SEAM1301",
+  audioType: "SEAM1302",
   latestShape: "SEAM1401",
   latestSignal: "SEAM1402",
   unknownFlow: "SEAM2001",

@@ -44,6 +44,8 @@ export interface SourceSite {
   start: number;
   end: number;
   async: boolean;
+  /** An array whose elements are each outside data (an AudioWorklet's inputs). */
+  each?: true;
 }
 
 // Members of TypeScript's lib whose results come from outside the program.
@@ -54,6 +56,8 @@ type SourceKind = "call" | "async" | "read";
 const SOURCES = new Map<string, SourceKind>([
   ["Body.json", "async"], // Response.json(), Request.json()
   ["Body.text", "async"],
+  ["Body.arrayBuffer", "async"],
+  ["Body.bytes", "async"],
   ["JSON.parse", "call"],
   ["Storage.getItem", "call"],
   ["StorageEvent.newValue", "read"], // another tab's localStorage
@@ -72,6 +76,9 @@ const SOURCES = new Map<string, SourceKind>([
   ["Clipboard.readText", "async"],
   ["DataTransfer.getData", "call"], // drag and drop, paste
   ["Blob.text", "async"], // files the user picked, File included
+  ["Blob.arrayBuffer", "async"], // ... and MediaRecorder's chunks
+  ["Blob.bytes", "async"],
+  ["MediaStreamTrack.getSettings", "call"], // the device may not honour the constraints asked for (16 kHz asked, 48 kHz given)
   ["FileReader.result", "read"],
 ]);
 
@@ -146,6 +153,18 @@ export function createChecker(ts: typeof import("typescript"), options: CheckerO
     return ts.isStringLiteralLike(node.argumentExpression) ? checker.getSymbolAtLocation(node.argumentExpression) : undefined;
   }
 
+  /** `process` in a class that extends AudioWorkletProcessor (whatever declares it: TypeScript's lib has no AudioWorklet scope). */
+  function isWorkletProcess(checker: ts.TypeChecker, node: ts.MethodDeclaration): boolean {
+    if (!ts.isIdentifier(node.name) || node.name.text !== "process") return false;
+    const cls = node.parent;
+    if (!ts.isClassLike(cls)) return false;
+    const base = cls.heritageClauses?.find((h) => h.token === ts.SyntaxKind.ExtendsKeyword)?.types[0]?.expression;
+    if (base === undefined || !/AudioWorkletProcessor$/.test(base.getText())) return false;
+    let symbol = checker.getSymbolAtLocation(base);
+    if (symbol !== undefined && symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
+    return symbol?.name === "AudioWorkletProcessor";
+  }
+
   /** An identifier that names a value here (not a declaration, a property name or an import). */
   function isBareReference(node: ts.Identifier): boolean {
     const p = node.parent;
@@ -177,8 +196,31 @@ export function createChecker(ts: typeof import("typescript"), options: CheckerO
       return checker.getAwaitedType(t) !== t;
     };
 
+    // The first parameter of `process` in AudioWorkletProcessor subclasses: audio from the audio thread.
+    const workletInputs = new Set<ts.Symbol>();
+    const workletInputNames = new Set<string>();
+
     const visit = (node: ts.Node): void => {
       let source: { kind: SourceKind; name: string } | undefined;
+      if (ts.isMethodDeclaration(node) && isWorkletProcess(checker, node)) {
+        const param = node.parameters[0];
+        if (param !== undefined && ts.isIdentifier(param.name)) {
+          const symbol = checker.getSymbolAtLocation(param.name);
+          if (symbol !== undefined) {
+            workletInputs.add(symbol);
+            workletInputNames.add(param.name.text);
+          }
+        } else if (param !== undefined) {
+          findings.push({
+            pos: param.getStart(file),
+            end: param.getEnd(),
+            code: Codes.sourceDestructure,
+            message: "Destructuring the inputs of an AudioWorkletProcessor's process would skip marking them Unknown; take them as one parameter (`process(inputs)`) and decode `inputs[0]` (as `Planar<Float32, 1>`, for example).",
+          });
+        }
+      } else if (ts.isIdentifier(node) && workletInputNames.has(node.text) && isBareReference(node) && workletInputs.has(checker.getSymbolAtLocation(node)!)) {
+        sites.push({ start: node.getStart(file), end: node.getEnd(), async: false, each: true });
+      }
       if ((ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) && SOURCE_MEMBERS.has(memberName(node) ?? "") && !isAssignmentTarget(node)) {
         source = sourceOf(program, memberSymbol(checker, node));
       } else if (ts.isIdentifier(node) && BARE_SOURCES.has(node.text) && isBareReference(node)) {

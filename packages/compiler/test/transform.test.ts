@@ -146,7 +146,7 @@ describe("boundary constraints", () => {
   it("rejects a constraint the field's type cannot take, with what it applies to", () => {
     const message = (field: string) => run(`boundary X { ${field} }`).diagnostics.map((d) => `${d.code} ${d.message}`);
     expect(message("s: string maxLength 3")).toEqual([
-      "SEAM1107 `maxLength` applies to Text fields (grapheme clusters) and arrays (elements); for a length in characters, declare the field Text<NFC>. `string` takes no `maxLength`.",
+      "SEAM1107 `maxLength` applies to Text (grapheme clusters), arrays (elements), Bytes (bytes) and Pcm / Planar (frames); for a length in characters, declare the field Text<NFC>. `string` takes no `maxLength`.",
     ]);
     for (const field of ["n: number matches /1/", "t: Text<NFC> in 1..2", "d: Decimal in 1..2", "b: boolean minLength 1", 'k: "a" | "b" matches /a/', "a: string[] matches /a/"]) {
       expect(codes(`boundary X { ${field} }`), field).toEqual(["SEAM1107"]);
@@ -176,6 +176,52 @@ describe("boundary constraints", () => {
     expect(Account.decode({ handle: "ada", name: "abcd", port: 80, quota: 1 })).toMatchObject({ ok: false, error: { path: ["name"], expected: "text of length 3 or less" } });
     expect(Account.decode({ handle: "ada", name: "a", port: 80, quota: 11 })).toMatchObject({ ok: false, error: { path: ["quota"], expected: "int64 in 0..10" } });
     expect(() => Account.encode({ handle: "Ada", name: "a", port: 80, quota: 1n })).toThrow(/at \["handle"\]/);
+  });
+});
+
+describe("binary boundary types", () => {
+  it("emits Bytes, Pcm and Planar decoders, with the format written as a string", () => {
+    const out = code(`boundary Frame { seq: number, audio: Pcm<Int16, 16000, 1> maxLength 3200, stereo: Pcm<Float32, 48000, 2>, raw?: Bytes maxLength 1024, quantum: Planar<Float32, 2> }`);
+    expect(out).toContain("type Frame = { seq: number, audio: Pcm<\"int16\", 16000, 1>, stereo: Pcm<\"float32\", 48000, 2>, raw?: Bytes, quantum: Planar<\"float32\", 2> };");
+    expect(out).toContain(`  audio: __b.length(__b.pcm("int16", 16000, 1), 0, 3200),
+  stereo: __b.pcm("float32", 48000, 2),
+  raw: __b.optional(__b.length(__b.bytes, 0, 1024)),
+  quantum: __b.planar("float32", 2),`);
+    expect(out).toMatch(/^import \{ __b, type ObjectDecoder as __ObjectDecoder, type Bytes, type Planar, Pcm \}|import \{[^}]*\bPcm\b[^}]*\} from "@seamscript\/runtime"/);
+  });
+
+  it("declares a boundary for a field type on its own, constrained or not", () => {
+    const out = code("export boundary MicChunk = Pcm<Int16, 16000, 1> minLength 320 maxLength 3200\nboundary Payload = Bytes;\nboundary Name = Text<NFC> maxLength 40");
+    expect(out).toContain('export type MicChunk = Pcm<"int16", 16000, 1>;\nexport const MicChunk: __Decoder<MicChunk> = __b.length(__b.pcm("int16", 16000, 1), 320, 3200);');
+    expect(out).toContain("type Payload = Bytes;\nconst Payload: __Decoder<Payload> = __b.bytes;");
+    expect(out).toContain('type Name = Text<"NFC">;\nconst Name: __Decoder<Name> = __b.length(__b.text("NFC"), 0, 40);');
+  });
+
+  it("decodes the binary types directly", () => {
+    expect(code("const r = decode Pcm<Float32, 48000, 2> from v;")).toContain('const r = __decode(__b.pcm("float32", 48000, 2), v);');
+    expect(code("const r = decode Bytes from v;")).toContain("const r = __decode(__b.bytes, v);");
+    expect(code("const r = decode Planar<Float32, 1> from v;")).toContain('const r = __decode(__b.planar("float32", 1), v);');
+  });
+
+  it("leaves a type parameter as the format in other type positions", () => {
+    expect(code("export function play<F extends SampleFormat>(p: Pcm<F, 16000, 1>) { return p; }\ntype SampleFormat = \"int16\" | \"float32\";")).toContain("p: Pcm<F, 16000, 1>");
+  });
+
+  it("reports arguments the types don't take", () => {
+    for (const field of ["a: Pcm<Int16, 16000>", "a: Pcm<Int24, 16000, 1>", "a: Pcm<Int16, 0, 1>", "a: Pcm<Int16, 44100.5, 1>", "a: Pcm<Int16, number, 1>", "a: Planar<Int16, 1>", "a: Planar<Float32>", "a: Planar<Float32, 0>"]) {
+      expect(codes(`boundary X { ${field} }`), field).toEqual(["SEAM1302"]);
+    }
+    expect(run("boundary X { a: Planar<Int16, 1> }").diagnostics[0]!.message).toMatch(/always Float32; use Pcm<Int16, \.\.\.> for Int16 bytes/);
+    expect(codes("boundary X { a: Bytes<1> }")).toEqual(["SEAM1101"]);
+  });
+
+  it("takes length constraints on the binary types only", () => {
+    expect(codes("boundary X { a: Bytes matches /x/ }")).toEqual(["SEAM1107"]);
+    expect(codes("boundary X { a: Pcm<Int16, 16000, 1> in 1..2 }")).toEqual(["SEAM1107"]);
+  });
+
+  it("keeps constraints off a union of boundaries", () => {
+    expect(codes("boundary A { kind: \"a\" }\nboundary B { kind: \"b\" }\nboundary U = A | B maxLength 3")).toEqual(["SEAM1107"]);
   });
 });
 

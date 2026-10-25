@@ -157,7 +157,7 @@ export function createSeamProgram(
     const mapped = sites.flatMap((site) => {
       const start = originalOffset(map, sf, source, site.start);
       const last = originalOffset(map, sf, source, site.end - 1);
-      return start === undefined || last === undefined ? [] : [{ start, end: last + 1, async: site.async }];
+      return start === undefined || last === undefined ? [] : [{ start, end: last + 1, async: site.async, ...(site.each ? { each: true as const } : {}) }];
     });
     if (mapped.length > 0) wraps.set(fileName, mapped);
   }

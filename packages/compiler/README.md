@@ -23,14 +23,15 @@ Checking runs in two passes. The first pass finds the sources of outside data (i
 
 | Built in | |
 |---|---|
-| Fetch | `Body.json()`, `Body.text()` (`Response`, `Request`) |
+| Fetch | `Body.json()`, `Body.text()`, `Body.arrayBuffer()`, `Body.bytes()` (`Response`, `Request`) |
 | JSON | `JSON.parse` |
 | Storage | `Storage.getItem` (`localStorage`, `sessionStorage`), `StorageEvent.newValue` / `oldValue`, `IDBRequest.result`, `IDBCursorWithValue.value` |
 | URL and page state | `URLSearchParams.get` / `getAll`, `Location.hash`, `History.state`, `Document.cookie` |
 | Messages | `MessageEvent.data` (WebSocket, workers, `postMessage`), `ExtendableMessageEvent.data`, `PushMessageData.json()` / `text()` |
-| Clipboard and files | `Clipboard.readText()`, `DataTransfer.getData`, `Blob.text()`, `FileReader.result` |
+| Clipboard and files | `Clipboard.readText()`, `DataTransfer.getData`, `Blob.text()`, `Blob.arrayBuffer()`, `Blob.bytes()` (files, MediaRecorder chunks), `FileReader.result` |
+| Audio | `MediaStreamTrack.getSettings()` (a device may not deliver what was asked for), and the first parameter of `process` in a class that extends `AudioWorkletProcessor`: each of its elements (`inputs[0]`) is `Unknown`, to be decoded as `Planar<Float32, Channels>` |
 
-`location.search` is not a source: read it through `URLSearchParams`. Writes (`location.hash = "#a"`) are not affected.
+`location.search` is not a source: read it through `URLSearchParams`. Writes (`location.hash = "#a"`) are not affected. TypeScript's lib has no AudioWorklet scope, so `AudioWorkletProcessor` is whatever the project declares under that name; destructuring `process`'s inputs is SEAM2004.
 
 A project declares more in `tsconfig.json`:
 
@@ -57,12 +58,13 @@ A declared method that returns a promise gives `Promise<Unknown>`. `seamc`, the 
 | SEAM1101 | A type that can't cross a boundary (in a field or as a decode target: functions, any, generic types, and so on) |
 | SEAM1102 | A boundary can only appear at the top level of a module |
 | SEAM1103 | A boundary can contain only fields |
-| SEAM1104 | The members of a union boundary must be boundary names |
+| SEAM1104 | A union boundary that lists boundaries can list only boundaries (`boundary Event = Paid \| Int64`). A boundary of a field type alone, `boundary Chunk = Pcm<Int16, 16000, 1>`, is not a union boundary |
 | SEAM1105 | A union member has no discriminant field |
 | SEAM1106 | A type that isn't a boundary is referenced as a boundary |
-| SEAM1107 | A constraint the field's type can't take (`maxLength` on `string`, `in` on Text), or one no value or no consistent test satisfies (`in 10..1`, a `g` flag) |
+| SEAM1107 | A constraint the field's type can't take (`maxLength` on `string`, `in` on Text), one no value or no consistent test satisfies (`in 10..1`, a `g` flag), or constraints on a union of boundaries |
 | SEAM1201 | Reserved (an invalid decode target is reported as SEAM1101) |
 | SEAM1301 | A Text other than `Text<NFC>` / `Text<NFD>` |
+| SEAM1302 | `Pcm` / `Planar` with arguments they don't take (`Pcm<Int24, 16000, 1>`, a rate that isn't a positive whole number, `Planar<Int16, 1>`) |
 | SEAM1401 | A latest function can't be a generator |
 | SEAM1402 | The type of a latest function's AbortSignal parameter isn't written as `AbortSignal` |
 | SEAM2001 | Unknown flows to an exit other than decode (`as`, assignment to `unknown` or `any`, templates, `+`, `in`, `throw`, and so on) |

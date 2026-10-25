@@ -77,6 +77,16 @@ describe("boundary", () => {
     expect(scope("const")).toBe("storage.type.ts");
   });
 
+  it("colors constraints after an alias boundary's type", async () => {
+    const all = await tokens("export boundary MicChunk = Pcm<Int16, 16000, 1> minLength 320 maxLength 3200\nconst x = 1;");
+    const scope = (text: string) => all.find(([t]) => t === text)?.[1];
+    expect(scope("boundary")).toBe("storage.type.boundary.seamscript");
+    expect(scope("Pcm")).toBe("entity.name.type.ts");
+    expect(scope("minLength")).toBe("keyword.operator.constraint.seamscript");
+    expect(scope("3200")).toBe("constant.numeric.decimal.ts");
+    expect(scope("const")).toBe("storage.type.ts");
+  });
+
   it("leaves a variable named boundary alone", async () => {
     expect(await scopeOf("const boundary = 1; boundary.x;", "boundary")).not.toMatch(/seamscript/);
   });

@@ -10,6 +10,8 @@ export interface SeamBoundaryDeclaration extends BaseNode {
   id: t.Identifier;
   body: t.TSTypeLiteral | null;
   union: t.TSType | null;
+  /** After the type of `boundary Name = Type` (an alias of a field type). */
+  constraints?: SeamConstraint[];
 }
 
 /**

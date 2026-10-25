@@ -6,13 +6,14 @@ The SeamScript runtime. Code that the compiler outputs imports it. Inside `.seam
 
 ```ts
 type Result<T, E> = { ok: true; value: T } | { ok: false; error: E };
-type DecodeError = { kind: "decode"; path: string[]; expected: string; actual: string };
+type DecodeError = { kind: "decode"; path: string[]; expected: string; actual: string; rule: DecodeRule };
 ```
 
 `decode T from v` never throws; it returns `Result<T, DecodeError>`. `path` is where it failed (`["orders", "3", "price"]`), `expected` is the type it wanted, and `actual` is the name of the actual type. The value itself is never included (so personal data doesn't end up in logs). The exception is a mismatched literal: for strings of 40 characters or fewer and for numbers, the value is shown, as in `"pending"`.
 
 - `decode T from json text` parses `text` first. Malformed JSON is a failure with `expected: "JSON"` and `actual: "malformed JSON"` (the parser's message, which quotes the input, is not passed on), and input that is not a string has `expected: "JSON text"`.
 - Constraints on boundary fields (`matches /re/`, `minLength`, `maxLength`, `in A..B`) fail with the field's whole expectation, as in `expected: "text of length 1..40"`, `actual: "length 41"`, or `expected: "string matching /^[a-z]+$/"`, `actual: "string (no match)"`.
+- `rule` says which check failed, for code that reacts to the kind of failure: `"type"` (the wrong type), `"value"` (the right type with an unacceptable value: an unlisted literal, a non-canonical Int64 string), `"missing"`, `"unreadable"`, `"depth"`, `"json"`, `"pattern"` / `"length"` / `"range"` (constraints), `"nonFinite"`, and for audio `"format"`, `"sampleRate"`, `"channels"`, `"frameAlignment"`.
 - Nesting is limited to 512 levels (`MAX_DEPTH`). Deeper input returns a failure.
 - Only own properties are read. Exceptions thrown by getters or Proxies are also returned as a failure (`"unreadable"`).
 - Fields that aren't in the boundary are dropped, so the backend can add fields without breaking anything.
@@ -57,6 +58,33 @@ await Text.ready;
 if (Text.status === "failed") showError();
 ```
 
+## Binary data and audio
+
+| Type | Accepts | Value |
+|---|---|---|
+| `Bytes` | an ArrayBuffer or any view on one (not shared memory) | a `Uint8Array` over the same bytes |
+| `Pcm<F, Rate, Channels>` | little-endian PCM bytes, the format's typed array (`Int16Array` / `Float32Array`), or a WAV file whose header matches | `{ format, sampleRate, channels, frames, samples }`, samples interleaved |
+| `Planar<"float32", Channels>` | an array of one `Float32Array` per channel, all the same length | `{ format, channels, frames }`, the arrays themselves |
+
+In `.seam.ts` the format is written `Int16` / `Float32` (`Pcm<Int16, 16000, 1>`) and compiles to `"int16"` / `"float32"`. Plain PCM bytes carry no sample rate or channel count, so those are taken as declared; a WAV header is checked against them. Float32 samples must be finite. `encode` gives what `WebSocket.send` and `postMessage` take: `Pcm` its little-endian bytes (an `ArrayBuffer`), `Bytes` itself, `Planar` its channel arrays. `Pcm.of(format, rate, channels, samples)` makes `Pcm` from samples the app produced (it throws if they don't fit). `Planar` does not copy: the audio thread reuses its arrays after `process` returns, so copy what you keep. `yarn bench` (`bench/process.ts`) times the decode as `process` would run it: about 0.4 µs for one 128-frame mono input and 0.7–0.9 µs for stereo in Node 24, against the 2,667 µs between calls at 48 kHz.
+
+## ChunkStream
+
+`ChunkStream.of(decoder, policy, onEvent)` decodes each chunk pushed into it and delivers them to `onEvent` in sequence order, once each.
+
+| Policy | Default | Meaning |
+|---|---|---|
+| `seq(chunk)` | (required) | The chunk's sequence number, a safe integer |
+| `first` | the first number that arrives | The number to start from |
+| `gap: { wait, then }` | `{ wait: 0, then: "drop" }` | Hold later chunks up to `wait` ms for a missing number, then skip it; `"error"` also reports a `gap` event |
+| `duplicate` | `"drop"` | A number already delivered or held |
+| `late` | `"drop"` | A skipped number that arrives after all |
+| `maxBuffer` | 64 | Held chunks at most; one more skips the oldest gap at once (`reason: "overflow"`) |
+
+Events are `chunk`, `gap`, `duplicate`, `late` (the last three only when asked for with `"error"`) and `invalid` (a chunk that failed its boundary, always reported). `stats` counts everything, dropped chunks included. `reset(next?)` starts a new numbering (after a reconnect), `close()` stops the wait timer. Events are delivered after the stream's state is updated, so `onEvent` may push into the stream.
+
+Delivered numbers strictly increase, a skipped number is never delivered later, and with nothing lost and no gap skipped everything is delivered: `spec/chunkstream.tla` checks this with TLC under reordering, duplication and loss (`chunkstream_accept_old.cfg` is a sanity check that must fail).
+
 ## latest
 
 A `latest async function` returns only the result of the most recent call. Earlier calls become `Stale` (`{ ok: false, error: { kind: "stale" } }`) when they finish, and if the last parameter is an `AbortSignal`, they are aborted (callers don't pass that argument).
@@ -70,4 +98,4 @@ if (!r.ok && r.error.kind === "stale") return;   // a newer search has started
 
 ## Unknown and fetch
 
-`Unknown` is the type of data from outside, and its only exits are `decode` and `Unknown.log(v)` (for debugging; it only prints the value). Which values are outside data is decided by the compiler: the web APIs that deliver it (`Body.json` and `text`, `JSON.parse`, `Storage.getItem`, `URLSearchParams.get`, `MessageEvent.data`, `IDBRequest.result`, `Clipboard.readText`, `Blob.text`, `FileReader.result`, `Location.hash`, `History.state`, `Document.cookie`, and others), plus whatever the project declares in `tsconfig.json` (see `@seamscript/compiler`). Inside `.seam.ts`, `fetch` comes from this package: underneath it is the global `fetch`, but `res.json()` has the type `Promise<Unknown>`.
+`Unknown` is the type of data from outside, and its only exits are `decode` and `Unknown.log(v)` (for debugging; it only prints the value). Which values are outside data is decided by the compiler: the web APIs that deliver it (`Body.json`, `text`, `arrayBuffer` and `bytes`, `Blob.arrayBuffer` and `bytes`, `MediaStreamTrack.getSettings`, an AudioWorklet's `process` inputs, `JSON.parse`, `Storage.getItem`, `URLSearchParams.get`, `MessageEvent.data`, `IDBRequest.result`, `Clipboard.readText`, `Blob.text`, `FileReader.result`, `Location.hash`, `History.state`, `Document.cookie`, and others), plus whatever the project declares in `tsconfig.json` (see `@seamscript/compiler`). Inside `.seam.ts`, `fetch` comes from this package: underneath it is the global `fetch`, but `res.json()` has the type `Promise<Unknown>`.

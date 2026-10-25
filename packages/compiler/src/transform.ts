@@ -18,7 +18,17 @@ import {
   start,
   walk,
 } from "./ast.js";
-import { BUILTIN_TYPES, type Builtin, type BoundaryInfo, type DecoderScope, decoderFor, objectDecoder, textForm, unionBoundaryDecoder } from "./decoders.js";
+import {
+  BUILTIN_TYPES,
+  type Builtin,
+  type BoundaryInfo,
+  type DecoderScope,
+  decoderFor,
+  objectDecoder,
+  sampleFormat,
+  textForm,
+  unionBoundaryDecoder,
+} from "./decoders.js";
 import { Codes, type Diagnostic, lineColumn } from "./diagnostics.js";
 
 export const RUNTIME_MODULE = "@seamscript/runtime";
@@ -26,8 +36,8 @@ export const CORE_MODULE = "@seamscript/core";
 export const DEFERRED_CORE_MODULE = "@seamscript/core/deferred";
 
 /** Runtime names a `.seam.ts` file may use without importing them (when it does not bind them itself). */
-const AMBIENT_VALUES = ["Decimal", "Int64", "Text", "Unknown", "Zoned", "fetch"];
-const AMBIENT_TYPES = ["DecodeError", "Err", "Ok", "Result", "Stale"];
+const AMBIENT_VALUES = ["ChunkStream", "Decimal", "Int64", "Pcm", "Text", "Unknown", "Zoned", "fetch"];
+const AMBIENT_TYPES = ["Bytes", "DecodeError", "Err", "Ok", "Planar", "Result", "Stale"];
 
 /**
  * An expression to mark as Unknown, found by the checker's first pass. Offsets
@@ -38,6 +48,8 @@ export interface UnknownWrap {
   end: number;
   /** `Response.json()`: the expression is a promise of the data. */
   async: boolean;
+  /** An AudioWorklet's `inputs`: an array whose elements are each outside data. */
+  each?: true;
 }
 
 export interface TransformOptions {
@@ -115,6 +127,7 @@ export function transform(source: string, fileName: string, options: TransformOp
   const decodes: SeamDecodeExpression[] = [];
   const latests: SeamLatestDeclaration[] = [];
   const textForms: t.TSTypeReference[] = [];
+  const sampleForms: t.TSTypeReference[] = [];
   const usedAmbient = new Set<string>();
   let textAtRuntime = false;
   const names = new Set<string>();
@@ -141,8 +154,14 @@ export function transform(source: string, fileName: string, options: TransformOp
       case "SeamLatestDeclaration":
         latests.push(node);
         break;
-      case "TSTypeReference":
-        if (scope.builtin(node.typeName) === "Text" && node.typeArguments) {
+      case "TSTypeReference": {
+        const builtin = scope.builtin(node.typeName);
+        // Pcm<Int16, ...> / Planar<Float32, ...>: the format's name, unless it is a type parameter or already a string.
+        const format = node.typeArguments?.params[0];
+        if ((builtin === "Pcm" || builtin === "Planar") && format?.type === "TSTypeReference" && sampleFormat(format) !== undefined) {
+          sampleForms.push(format);
+        }
+        if (builtin === "Text" && node.typeArguments) {
           const arg = node.typeArguments.params[0];
           if (textForm(node) === undefined) {
             scope.report(node, Codes.textForm, "Text takes its normalization form: Text<NFC> or Text<NFD>.");
@@ -151,6 +170,7 @@ export function transform(source: string, fileName: string, options: TransformOp
           }
         }
         break;
+      }
       case "Identifier":
         names.add(node.name);
         // `Text.nfc(...)`, `Text.length(t)`: Text as a value, which needs the core at run time.
@@ -175,6 +195,8 @@ export function transform(source: string, fileName: string, options: TransformOp
     const arg = ref.typeArguments!.params[0]!;
     s.overwrite(start(arg), end(arg), `"${textForm(ref)}"`);
   }
+  // Pcm<Int16, 16000, 1> → Pcm<"int16", 16000, 1>
+  for (const arg of sampleForms) s.overwrite(start(arg), end(arg), `"${sampleFormat(arg)}"`);
 
   const helpers = new Set<string>();
   const helperTypes = new Set<string>();
@@ -199,7 +221,8 @@ export function transform(source: string, fileName: string, options: TransformOp
       declaredType = `__ObjectDecoder<${name}>`;
       helperTypes.add("ObjectDecoder");
     } else {
-      decoder = unionBoundaryDecoder(node as SeamBoundaryDeclaration & { union: t.TSType }, scope);
+      decoder = unionBoundaryDecoder(node as SeamBoundaryDeclaration & { union: t.TSType }, scope, index);
+      if (node.constraints?.length) s.remove(end(node.union!), end(node.constraints[node.constraints.length - 1]!));
       declaredType = `__Decoder<${name}>`;
       helperTypes.add("Decoder");
     }
@@ -214,8 +237,9 @@ export function transform(source: string, fileName: string, options: TransformOp
   // so that a wrap ending where a decode ends closes first: __decode(X, __unknown(v)).
   const wraps = [...(options.wraps ?? [])];
   for (const w of [...wraps].sort((a, b) => a.start - b.start || b.end - a.end)) {
-    s.appendRight(w.start, w.async ? "__unknownAsync(" : "__unknown(");
-    helpers.add(w.async ? "__unknownAsync" : "__unknown");
+    const helper = w.async ? "__unknownAsync" : w.each ? "__unknownEach" : "__unknown";
+    s.appendRight(w.start, `${helper}(`);
+    helpers.add(helper);
   }
   for (const w of wraps.sort((a, b) => a.end - b.end || b.start - a.start)) s.appendLeft(w.end, ")");
 

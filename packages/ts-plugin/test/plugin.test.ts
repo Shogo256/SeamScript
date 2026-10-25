@@ -114,6 +114,25 @@ describe("SeamScript's own diagnostics", () => {
     const file = await openNew("note.seam.ts", text);
     expect(codes(await semantic(file)).sort()).toEqual(["SEAM1101@3", "SEAM2101@5"]);
   });
+
+  it("treats an AudioWorklet's inputs as outside data to decode, and checks audio boundaries", async () => {
+    const text = [
+      "declare class AudioWorkletProcessor { readonly port: MessagePort; }",
+      "boundary Quantum = Planar<Float32, 1> maxLength 128",
+      "boundary Chunk = Pcm<Int24, 16000, 1>",
+      "export class Capture extends AudioWorkletProcessor {",
+      "  process(inputs: Float32Array[][]) {",
+      "    const raw: Float32Array[] = inputs[0]!;",
+      "    const q = decode Quantum from inputs[0];",
+      "    if (q.ok) this.port.postMessage(q.value.channels[0].slice());",
+      "    return raw.length > 0;",
+      "  }",
+      "}",
+      "",
+    ].join("\n");
+    const file = await openNew("capture.seam.ts", text);
+    expect(codes(await semantic(file)).sort()).toEqual(["SEAM1302@3", "TS2304@3", "TS2740@6"]);
+  });
 });
 
 describe("editing", () => {

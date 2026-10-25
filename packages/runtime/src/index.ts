@@ -1,5 +1,6 @@
-export { type Ok, type Err, type Result, type DecodeError, type Stale, ok, err } from "./result.js";
-export { Unknown, __unknown, __unknownAsync } from "./unknown.js";
+export { type Ok, type Err, type Result, type DecodeError, type DecodeRule, type Stale, ok, err } from "./result.js";
+export { Pcm, type Bytes, type Planar, type SampleFormat, type Samples, type ChannelArrays } from "./audio.js";
+export { Unknown, __unknown, __unknownAsync, __unknownEach } from "./unknown.js";
 export { Int64 } from "./int64.js";
 export { Decimal, type Rounding } from "./decimal.js";
 export { Zoned } from "./zoned.js";
@@ -28,3 +29,4 @@ export {
   type LatestReturn,
 } from "./latest.js";
 export { fetch, type SeamResponse } from "./fetch.js";
+export { ChunkStream, type StreamPolicy, type StreamEvent, type StreamStats, type StreamAction } from "./stream.js";

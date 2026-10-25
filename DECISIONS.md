@@ -291,6 +291,49 @@ In development builds the compiler doesn't import `@seamscript/core`, so during 
 - **What depends on TypeScript's JavaScript API**: the checker (both passes use `ts.Program` and `TypeChecker`), `createSeamProgram` and the editor plugin (tsserver's plugin API, through Volar). The parser fork, the transform, the runtime and the core don't.
 - **Plan**: keep the transform as it is (it outputs plain TypeScript, which TypeScript 7 checks unchanged), and move the checker onto TypeScript 7's API when its JavaScript client (IPC to the Go process) offers types and symbols for a program: the two passes need `getTypeAtLocation`, `getContextualType`, `isTypeAssignableTo`, symbol declarations and `getAwaitedType`. Pass 1 should then ask for all source sites in one request instead of one call per identifier, since every call crosses a process boundary. The editor side follows TypeScript 7's language server: Volar's support for it, or a plugin mechanism if it gets one. Until then `seamc` stays on TypeScript 5.9 through its dependency, and the plugin runs on the tsserver the editor provides, which is TypeScript 5.x in every editor today.
 
+## Decisions for real-time voice frontends
+
+The goal was to let the frontend of a real-time voice interpretation app be written in SeamScript. Translation control, voice activity detection and pipeline synchronisation are the backend's responsibility and are not in the language.
+
+- **No new syntax.** Binary data gets boundary types (`Bytes`, `Pcm`, `Planar`), chunk sequences a runtime function (`ChunkStream.of`), and the audio entry points are sources. The only change to the grammar is that a boundary may now be a field type on its own, with constraints: `boundary Chunk = Pcm<Int16, 16000, 1> maxLength 3200` (the existing `boundary Name = ...` form, which used to take only a union of boundaries). A union that names a boundary still takes only boundaries (SEAM1104).
+- **Utterance generations were dropped.** A design with per-utterance generation lines (current / open / retired, a window, `retire`) was reviewed and then left out: which results to discard is decided by the backend's pipeline, and an app can check an utterance number as an ordinary boundary field and discard with `latest`. Nothing was added to the language for it.
+
+### Binary boundary types
+
+- **`DecodeError.rule`** says which check failed (`type`, `value`, `missing`, `unreadable`, `depth`, `json`, `pattern`, `length`, `range`, `nonFinite`, `format`, `sampleRate`, `channels`, `frameAlignment`). It is a required field: every failure has one, so a `switch` on it is exhaustive. Code that builds `DecodeError` values itself must add it.
+- **`Pcm<F, Rate, Channels>`** accepts little-endian PCM bytes (an ArrayBuffer or any view), the format's typed array as it is (what an AudioWorklet posts), or a WAV file. Plain PCM bytes carry no sample rate or channel count, so the declared ones are assumed and only the frame alignment and length are checked; the docs say so and point to WAV or a JSON field for the rate. A WAV header is checked against the declaration: format code 1 with 16 bits for Int16, 3 with 32 bits for Float32, WAVE_FORMAT_EXTENSIBLE's subformat, chunks skipped with their pad byte, and a data size past the end (a streaming encoder's 0xFFFFFFFF) read as "up to the end". Raw bytes that happen to start with "RIFF....WAVE" are read as WAV; real PCM samples practically never do.
+- **Views, not copies**: aligned little-endian samples are a view on the received buffer; bytes at an offset that isn't a multiple of the sample size are copied, and so is everything on a big-endian host (none in practice). Shared memory (`SharedArrayBuffer`) is refused, since another thread could change it after the check.
+- **Float32 samples must be finite**: NaN or an infinity in audio is a bug upstream that would otherwise reach the speakers or a model. The check is one subtraction per sample.
+- **`Planar<Float32, Channels>`** wraps the channel arrays without copying, because `process` runs every 2.7 ms at 48 kHz (128 frames) and the arrays are discarded right after; the docs say to copy what is kept. It is Float32 only, since the audio thread's data always is. A literal channel count gives a tuple type (`channels[0]` is defined), up to 16 channels.
+- **Length constraints count** bytes for `Bytes` and frames (samples per channel) for `Pcm` and `Planar`.
+- **`encode`** gives what `WebSocket.send` and `postMessage` take: `Pcm` its bytes (the samples' own buffer when it holds exactly them, a copy otherwise), `Bytes` itself, `Planar` its arrays. `Pcm.of` makes a `Pcm` from samples the app produced, checking them like a decode but throwing, as construction does elsewhere (`Text.nfc` never fails, `Pcm.of` can).
+- **The format is written as a name**, `Pcm<Int16, ...>`, like `Text<NFC>`, and compiles to a string literal type. A type parameter in that position is left alone, so functions can be generic over the format; a boundary field needs literals, since its decoder is built from them (SEAM1302).
+
+### ChunkStream
+
+- **A runtime function, not syntax**: the policy is an object whose values TypeScript checks (`"drop" | "error"`), and a stream is created per connection anyway.
+- **Every default drops**: `duplicate`, `late` and `gap.then` default to `"drop"`, and dropped chunks are only counted in `stats`. After a reconnect a server commonly resends what it sent before, and an `"error"` default would turn that into a flood of events. Decode failures (`invalid`) are always reported, because they mean the data is wrong, not merely repeated.
+- **`gap.wait` defaults to 0**: waiting adds latency, which a voice app pays on every gap, so it is opted into. Holding more than `maxBuffer` chunks skips the oldest gap at once; that is reported as a `gap` event with `reason: "overflow"` rather than an event kind of its own.
+- **Late versus duplicate**: a number below the next expected one is late if it was skipped, a duplicate otherwise. The last 256 skipped ranges are remembered; older ones count as duplicates.
+- **Events are delivered after the state is updated**, so a handler may push or reset without seeing a half-updated stream.
+- **A TLA+ model** (`packages/runtime/spec/chunkstream.tla`) checks, under reordering, duplication and loss, that delivered numbers strictly increase, that a skipped number is never delivered later, that nothing sent vanishes without being delivered, skipped, held, in flight or lost, that everything is delivered when nothing was lost or skipped, and that at most `maxBuffer` chunks are held: 425,789 states for 6 chunks, a buffer of 3, 3 duplications and 2 losses. `chunkstream_accept_old.cfg` delivers old numbers instead of dropping them, and TLC must find a counterexample. A fast-check property in the tests checks the same ordering on the implementation with random arrival orders.
+
+### Audio sources
+
+- **Added**: `Body.arrayBuffer` / `bytes`, `Blob.arrayBuffer` / `bytes` (files and MediaRecorder chunks), `MediaStreamTrack.getSettings()` (a device may not deliver the constraints asked for), and the first parameter of `process` in a class that extends `AudioWorkletProcessor`.
+- **An AudioWorklet's inputs are an array of outside data**, not outside data as a whole: they are wrapped as `readonly Unknown[]` (`__unknownEach`), so `inputs[0]` is `Unknown` and can be decoded as `Planar`, and `inputs.length` still works. TypeScript's lib has no AudioWorklet scope, so the base class is recognized by name, whatever declares it. Destructuring the parameter is SEAM2004.
+- **`MediaStream` itself is not a source**: it is a browser object, not data; the data comes out through the sources above.
+- **Not covered**: APIs that write into an array the caller passes (`AnalyserNode.getFloatTimeDomainData`, `AudioBuffer.copyFromChannel`) can't be followed by the checker, since the data arrives in the caller's own array.
+
+- **Cost in `process`** (`packages/runtime/bench/process.ts`, Node 24, median of 15–21 rounds of 10,000–20,000 calls): decoding one 128-frame input as `Planar<Float32, 1>` takes 0.39–0.43 µs, `Planar<Float32, 2>` 0.70–0.90 µs, and a failing decode (no input yet) 0.16–0.23 µs. At 48 kHz `process` is called every 2,667 µs, so the boundary takes under 0.04% of the audio thread's budget; copying the block to post it (1.6–2.5 µs) costs more than checking it. This is V8 on the main thread, not the audio thread itself.
+
+### The voice sample (`sandbox/voice`)
+
+- **The echo server is part of the sandbox backend** (`/voice/echo`), which already uses `ws`, so no library was added.
+- **The AudioContext is created before the first `await`** in the click handler: created after `getUserMedia`, it can stay suspended for want of a user gesture.
+- **The round trip is checked by content, not by count**: each frame carries a sequence number, the page keeps a SHA-256 of each chunk's samples as sent and compares it with what comes back under that number, and everything played goes through an AnalyserNode whose level must be above an RMS of 0.001 in at least 10 windows during playback. With the microphone replaced by zeros every hash still matches and the test fails on the level, so it can't pass on silence; flipping one byte after hashing is caught as exactly one mismatch.
+- **E2E**: the round trip runs in Chromium with a fake microphone. In this environment headless Firefox never starts an AudioContext (it stays `"suspended"` even after a trusted click, with or without the autoplay and null-audio-backend preferences), and Playwright's WebKit build has no capture device, so those runs are skipped with the reason. The rejection test (a text frame and an odd byte count come back and are rejected with `rule: "type"` and `"frameAlignment"`, and a valid chunk after them still plays) needs only the WebSocket and runs in Chromium and Firefox.
+
 ## Open questions
 
 ### From the demonstration

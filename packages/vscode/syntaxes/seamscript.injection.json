@@ -36,6 +36,9 @@
           "include": "#boundary-body"
         },
         {
+          "include": "#constraint"
+        },
+        {
           "include": "source.ts#type"
         }
       ]

@@ -12,8 +12,8 @@ export interface BoundaryInfo {
 }
 
 /** The runtime's types that the compiler gives a meaning (decoders, Text's form argument). */
-export type Builtin = "Text" | "Int64" | "Decimal" | "Zoned" | "Unknown";
-export const BUILTIN_TYPES: readonly Builtin[] = ["Text", "Int64", "Decimal", "Zoned", "Unknown"];
+export type Builtin = "Text" | "Int64" | "Decimal" | "Zoned" | "Unknown" | "Bytes" | "Pcm" | "Planar";
+export const BUILTIN_TYPES: readonly Builtin[] = ["Text", "Int64", "Decimal", "Zoned", "Unknown", "Bytes", "Pcm", "Planar"];
 
 export interface DecoderScope {
   source: string;
@@ -37,7 +37,49 @@ export interface DecoderScope {
  */
 export type Site = { kind: "field"; ownerIndex: number } | { kind: "decode" };
 
-const BUILTINS: Record<string, string> = { Int64: "__b.int64", Decimal: "__b.decimal", Zoned: "__b.zoned" };
+const BUILTINS: Record<string, string> = { Int64: "__b.int64", Decimal: "__b.decimal", Zoned: "__b.zoned", Bytes: "__b.bytes" };
+
+/** Sample formats as written in `Pcm<Int16, ...>` / `Planar<Float32, ...>`, and in their compiled spelling. */
+const SAMPLE_FORMATS: Record<string, "int16" | "float32"> = { Int16: "int16", Float32: "float32", int16: "int16", float32: "float32" };
+
+/** The sample format argument of `Pcm` or `Planar`, in source (`Int16`) or compiled (`"int16"`) spelling. */
+export function sampleFormat(arg: t.TSType | undefined): "int16" | "float32" | undefined {
+  let name: string | undefined;
+  if (arg?.type === "TSTypeReference" && arg.typeName.type === "Identifier" && !arg.typeArguments) name = arg.typeName.name;
+  if (arg?.type === "TSLiteralType" && arg.literal.type === "StringLiteral") name = arg.literal.value;
+  return name === undefined ? undefined : SAMPLE_FORMATS[name];
+}
+
+/** A positive integer literal type (a sample rate, a channel count), or undefined. */
+function positiveInteger(arg: t.TSType | undefined): number | undefined {
+  if (arg?.type !== "TSLiteralType" || arg.literal.type !== "NumericLiteral") return undefined;
+  const n = arg.literal.value;
+  return Number.isSafeInteger(n) && n > 0 ? n : undefined;
+}
+
+const PCM_FORM = "Pcm takes a sample format, a sample rate and a channel count: Pcm<Int16, 16000, 1> or Pcm<Float32, 48000, 2>.";
+const PLANAR_FORM = "Planar takes Float32 and a channel count: Planar<Float32, 1>.";
+
+/** `__b.pcm("int16", 16000, 1)` / `__b.planar("float32", 2)`, or a report of what is wrong with the arguments. */
+function audioDecoder(node: t.TSTypeReference, builtin: "Pcm" | "Planar", scope: DecoderScope): string | undefined {
+  const args = node.typeArguments?.params ?? [];
+  const format = sampleFormat(args[0]);
+  if (builtin === "Pcm") {
+    const rate = positiveInteger(args[1]);
+    const channels = positiveInteger(args[2]);
+    if (args.length !== 3 || format === undefined || rate === undefined || channels === undefined) {
+      scope.report(node, Codes.audioType, `${PCM_FORM} The rate and the channel count are positive whole numbers.`);
+      return undefined;
+    }
+    return `__b.pcm("${format}", ${rate}, ${channels})`;
+  }
+  const channels = positiveInteger(args[1]);
+  if (args.length !== 2 || format !== "float32" || channels === undefined) {
+    scope.report(node, Codes.audioType, format === "int16" ? `${PLANAR_FORM} Planar audio (an AudioWorklet's inputs) is always Float32; use Pcm<Int16, ...> for Int16 bytes.` : PLANAR_FORM);
+    return undefined;
+  }
+  return `__b.planar("float32", ${channels})`;
+}
 
 const text = (scope: DecoderScope, n: AnyNode) => scope.source.slice(start(n), end(n));
 
@@ -160,6 +202,7 @@ function referenceDecoder(node: t.TSTypeReference, scope: DecoderScope, site: Si
     scope.report(node, Codes.textForm, "Text needs its normalization form: Text<NFC> or Text<NFD>.");
     return undefined;
   }
+  if (builtin === "Pcm" || builtin === "Planar") return audioDecoder(node, builtin, scope);
   if (node.typeArguments) {
     const hint = name === "Array" || name === "ReadonlyArray" ? " Write T[] instead." : "";
     scope.report(node, Codes.boundaryFieldType, `Generic types cannot cross a boundary.${hint}`);
@@ -183,7 +226,7 @@ function referenceDecoder(node: t.TSTypeReference, scope: DecoderScope, site: Si
 }
 
 /** What a constraint can apply to. */
-type ValueKind = "string" | "text" | "number" | "int64" | "array" | "other";
+type ValueKind = "string" | "text" | "number" | "int64" | "array" | "bytes" | "audio" | "other";
 
 function valueKind(node: t.TSType, scope: DecoderScope): ValueKind {
   switch (node.type) {
@@ -195,7 +238,10 @@ function valueKind(node: t.TSType, scope: DecoderScope): ValueKind {
       return "array";
     case "TSTypeReference": {
       const builtin = scope.builtin(node.typeName);
-      return builtin === "Text" ? "text" : builtin === "Int64" ? "int64" : "other";
+      if (builtin === "Text") return "text";
+      if (builtin === "Int64") return "int64";
+      if (builtin === "Bytes") return "bytes";
+      return builtin === "Pcm" || builtin === "Planar" ? "audio" : "other";
     }
     default:
       return "other";
@@ -205,12 +251,12 @@ function valueKind(node: t.TSType, scope: DecoderScope): ValueKind {
 const RULES: Record<SeamConstraint["kind"], { kinds: readonly ValueKind[]; message: string }> = {
   matches: { kinds: ["string", "text"], message: "`matches` applies to string and Text<NFC|NFD> fields." },
   minLength: {
-    kinds: ["text", "array"],
-    message: "`minLength` applies to Text fields (grapheme clusters) and arrays (elements); for a length in characters, declare the field Text<NFC>.",
+    kinds: ["text", "array", "bytes", "audio"],
+    message: "`minLength` applies to Text (grapheme clusters), arrays (elements), Bytes (bytes) and Pcm / Planar (frames); for a length in characters, declare the field Text<NFC>.",
   },
   maxLength: {
-    kinds: ["text", "array"],
-    message: "`maxLength` applies to Text fields (grapheme clusters) and arrays (elements); for a length in characters, declare the field Text<NFC>.",
+    kinds: ["text", "array", "bytes", "audio"],
+    message: "`maxLength` applies to Text (grapheme clusters), arrays (elements), Bytes (bytes) and Pcm / Planar (frames); for a length in characters, declare the field Text<NFC>.",
   },
   in: { kinds: ["number", "int64"], message: "`in A..B` applies to number and Int64 fields." },
 };
@@ -219,7 +265,7 @@ const RULES: Record<SeamConstraint["kind"], { kinds: readonly ValueKind[]; messa
  * The decoder of a field whose type is followed by constraints. On `T | null`
  * they constrain T; on an optional field, the value when present.
  */
-function constrainedDecoder(type: t.TSType, constraints: readonly SeamConstraint[], scope: DecoderScope, site: Site): string | undefined {
+export function constrainedDecoder(type: t.TSType, constraints: readonly SeamConstraint[], scope: DecoderScope, site: Site): string | undefined {
   const members = unionMembers(type);
   const rest = members.filter((m) => m.type !== "TSNullKeyword");
   if (rest.length === 1 && members.length > 1) {
@@ -360,11 +406,23 @@ function literalFields(decl: SeamBoundaryDeclaration): Map<string, string[]> {
 export function unionBoundaryDecoder(
   decl: SeamBoundaryDeclaration & { union: t.TSType },
   scope: DecoderScope,
+  ownerIndex: number,
 ): string | undefined {
+  const members = unionMembers(decl.union);
+  const isBoundaryName = (m: t.TSType) => m.type === "TSTypeReference" && !m.typeArguments && scope.builtin(m.typeName) === undefined;
+  if (!members.some(isBoundaryName)) {
+    // An alias of a field type, constrained or not: `boundary Chunk = Pcm<Int16, 16000, 1> maxLength 3200`.
+    const site: Site = { kind: "field", ownerIndex };
+    return decl.constraints?.length ? constrainedDecoder(decl.union, decl.constraints, scope, site) : decoderFor(decl.union, scope, site);
+  }
   const names: string[] = [];
   const local: SeamBoundaryDeclaration[] = [];
   let ok = true;
-  for (const m of unionMembers(decl.union)) {
+  if (decl.constraints?.length) {
+    scope.report(decl.constraints[0]!, Codes.boundaryConstraint, "Constraints apply to a field type (`boundary Chunk = Pcm<Int16, 16000, 1> maxLength 3200`), not to a union of boundaries; put them on the members' fields.");
+    ok = false;
+  }
+  for (const m of members) {
     const name = m.type === "TSTypeReference" && m.typeName.type === "Identifier" ? m.typeName.name : undefined;
     const simple = m.type === "TSTypeReference" && !m.typeArguments && scope.builtin(m.typeName) === undefined;
     if (!simple) {

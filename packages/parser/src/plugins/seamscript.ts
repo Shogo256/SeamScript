@@ -3,6 +3,7 @@
 //
 //   boundary Order { id: Int64, memo: Text<NFC> }      SeamBoundaryDeclaration (body)
 //   boundary Event = Paid | Refunded                   SeamBoundaryDeclaration (union)
+//   boundary Chunk = Pcm<Int16, 16000, 1> maxLength 3200   (union, with constraints)
 //   boundary Port { n: number in 1..65535 }            SeamConstraint (on the field's TSTypeAnnotation)
 //   decode Order from await res.json()                 SeamDecodeExpression
 //   decode Order from json text                        SeamDecodeExpression (json: true)
@@ -111,6 +112,9 @@ export default (superClass: typeof Parser) =>
           this.expect(tt.eq);
           return this.tsParseType();
         });
+        // `boundary Chunk = Pcm<Int16, 16000, 1> maxLength 3200`
+        const constraints = this.seamParseConstraints();
+        if (constraints.length > 0) node.constraints = constraints;
         this.semicolon();
       } else {
         node.union = null;
