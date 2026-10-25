@@ -111,6 +111,8 @@ export async function startBackend(args: string[] = []): Promise<ServerProcess> 
       "/ts/=app-ts/dist",
       "--static",
       "/ucd/=../packages/core/.ucd/17.0.0",
+      "--static",
+      "/voice/=voice/dist",
       ...args,
     ],
     { cwd: root, stdio: ["ignore", "pipe", "inherit"] },

@@ -97,6 +97,18 @@ describe("boundary field constraints", () => {
     expect(() => parse("boundary P { s: Text<NFC> maxLength x }")).toThrow(/a number/);
   });
 
+  it("follows the type of an alias boundary", () => {
+    const [decl] = parse("boundary Chunk = Pcm<Int16, 16000, 1> minLength 160 maxLength 3200;\nconst x = 1;");
+    expect(decl!.union.type).toBe("TSTypeReference");
+    expect(shape(decl!.constraints)).toEqual([
+      { type: "SeamConstraint", kind: "minLength", value: 160 },
+      { type: "SeamConstraint", kind: "maxLength", value: 3200 },
+    ]);
+    expect(decl!.end).toBe("boundary Chunk = Pcm<Int16, 16000, 1> minLength 160 maxLength 3200;".length);
+    const [plain] = parse("boundary Event = Paid | Refunded");
+    expect(plain!.constraints).toBeUndefined();
+  });
+
   it("is not part of TypeScript type literals elsewhere", () => {
     expect(() => parse("type P = { s: string matches /x/ }")).toThrow();
     expect(() => parse("interface P { n: number in 1..2 }")).toThrow();

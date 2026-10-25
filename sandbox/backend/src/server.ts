@@ -141,8 +141,19 @@ export async function startServer(options: ServerOptions = {}): Promise<SandboxS
     });
   });
 
+  // /voice/echo: the voice sample's server, which sends every message straight back.
+  const echo = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
+  echo.on("connection", (ws) => {
+    ws.on("message", (data, isBinary) => ws.send(data, { binary: isBinary }));
+    ws.on("error", () => ws.terminate());
+  });
+
   server.on("upgrade", (req, socket, head) => {
     const path = new URL(req.url ?? "/", "http://x").pathname;
+    if (path === "/voice/echo") {
+      echo.handleUpgrade(req, socket, head, (ws) => echo.emit("connection", ws, req));
+      return;
+    }
     if (path !== "/ws") {
       socket.destroy();
       return;
@@ -421,6 +432,8 @@ export async function startServer(options: ServerOptions = {}): Promise<SandboxS
       }
       channels.clear();
       wss.close();
+      for (const ws of echo.clients) ws.terminate();
+      echo.close();
       server.closeAllConnections();
       await new Promise<void>((ok) => server.close(() => ok()));
     },

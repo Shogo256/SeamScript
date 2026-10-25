@@ -16,8 +16,18 @@ export default defineConfig({
   outputDir: "results/artifacts",
   use: { trace: "retain-on-failure" },
   projects: [
-    { name: "chromium", use: { ...devices["Desktop Chrome"] } },
-    { name: "firefox", use: { ...devices["Desktop Firefox"] } },
+    // A fake microphone (a tone) with no permission prompt, for the voice sample.
+    {
+      name: "chromium",
+      use: { ...devices["Desktop Chrome"], launchOptions: { args: ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"] } },
+    },
+    {
+      name: "firefox",
+      use: {
+        ...devices["Desktop Firefox"],
+        launchOptions: { firefoxUserPrefs: { "media.navigator.streams.fake": true, "media.navigator.permission.disabled": true } },
+      },
+    },
     { name: "webkit", use: { ...devices["Desktop Safari"] } },
   ],
 });

@@ -60,7 +60,7 @@ describe("object", () => {
     const r = __decode(Order, { ...valid, id: "6f1c0e3a-uuid" });
     expect(r).toEqual({
       ok: false,
-      error: { kind: "decode", path: ["id"], expected: "int64", actual: "string (not a canonical int64)" },
+      error: { kind: "decode", path: ["id"], expected: "int64", actual: "string (not a canonical int64)", rule: "value" },
     });
   });
 
@@ -72,7 +72,7 @@ describe("object", () => {
   it("reports missing fields", () => {
     const { total: _, ...rest } = valid;
     const r = __decode(Order, rest);
-    expect(r.ok === false && r.error).toMatchObject({ path: ["total"], actual: "missing" });
+    expect(r.ok === false && r.error).toMatchObject({ path: ["total"], actual: "missing", rule: "missing" });
   });
 
   it("drops keys that are not in the shape", () => {
@@ -106,7 +106,7 @@ describe("object", () => {
     ] as const) {
       expect(__decode(Order, input)).toEqual({
         ok: false,
-        error: { kind: "decode", path: [], expected: "object", actual },
+        error: { kind: "decode", path: [], expected: "object", actual, rule: "type" },
       });
     }
   });
@@ -155,9 +155,9 @@ describe("decodeJson", () => {
   it("reports malformed JSON and non-strings as decode errors, without echoing the input", () => {
     expect(__decodeJson(__b.string, "{secret")).toEqual({
       ok: false,
-      error: { kind: "decode", path: [], expected: "JSON", actual: "malformed JSON" },
+      error: { kind: "decode", path: [], expected: "JSON", actual: "malformed JSON", rule: "json" },
     });
-    expect(__decodeJson(__b.string, null)).toEqual({ ok: false, error: { kind: "decode", path: [], expected: "JSON text", actual: "null" } });
+    expect(__decodeJson(__b.string, null)).toEqual({ ok: false, error: { kind: "decode", path: [], expected: "JSON text", actual: "null", rule: "type" } });
   });
 
   it("reports the decoded value's errors with their paths", () => {
@@ -216,7 +216,7 @@ describe("primitives and builtin types as decode targets", () => {
     expect(__decode(status, 3)).toEqual({ ok: true, value: 3 });
     expect(__decode(status, "pending")).toEqual({
       ok: false,
-      error: { kind: "decode", path: [], expected: '"paid" | "open" | 3', actual: '"pending"' },
+      error: { kind: "decode", path: [], expected: '"paid" | "open" | 3', actual: '"pending"', rule: "value" },
     });
     expect(__decode(status, "3")).toMatchObject({ ok: false, error: { actual: '"3"' } });
     expect(__decode(status, "x".repeat(41))).toMatchObject({ ok: false, error: { actual: "string" } });
@@ -248,9 +248,9 @@ describe("union", () => {
   it("reports unknown and missing discriminants at the discriminant's path", () => {
     expect(__decode(PaymentEvent, { kind: "chargeback" })).toEqual({
       ok: false,
-      error: { kind: "decode", path: ["kind"], expected: '"paid" | "refunded" | "voided"', actual: '"chargeback"' },
+      error: { kind: "decode", path: ["kind"], expected: '"paid" | "refunded" | "voided"', actual: '"chargeback"', rule: "value" },
     });
-    expect(__decode(PaymentEvent, {})).toMatchObject({ ok: false, error: { path: ["kind"], actual: "missing" } });
+    expect(__decode(PaymentEvent, {})).toMatchObject({ ok: false, error: { path: ["kind"], actual: "missing", rule: "missing" } });
   });
 
   it("reports member field errors under the member's paths", () => {
@@ -362,8 +362,8 @@ describe("constraints", () => {
   });
 
   it("reports the field, the constraint and what was wrong, never the value", () => {
-    expect(failure({ handle: "Ada" })).toEqual({ kind: "decode", path: ["handle"], expected: "string matching /^[a-z][a-z0-9_]*$/", actual: "string (no match)" });
-    expect(failure({ port: 0 })).toEqual({ kind: "decode", path: ["port"], expected: "number in 1..65535", actual: "number (out of range)" });
+    expect(failure({ handle: "Ada" })).toEqual({ kind: "decode", path: ["handle"], expected: "string matching /^[a-z][a-z0-9_]*$/", actual: "string (no match)", rule: "pattern" });
+    expect(failure({ port: 0 })).toEqual({ kind: "decode", path: ["port"], expected: "number in 1..65535", actual: "number (out of range)", rule: "range" });
     expect(failure({ quota: "-1" })).toMatchObject({ path: ["quota"], expected: "int64 in 0..1000000000000", actual: "int64 (out of range)" });
     expect(failure({ tags: ["a", "b", "c"] })).toMatchObject({ path: ["tags"], expected: "string[] of length 2 or less", actual: "length 3" });
     expect(failure({ nick: "" })).toMatchObject({ path: ["nick"], expected: "text of length 1 or more | null", actual: "length 0" });

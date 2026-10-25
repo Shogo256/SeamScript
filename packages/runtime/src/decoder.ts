@@ -1,7 +1,19 @@
+import {
+  type Bytes,
+  type Pcm,
+  type Planar,
+  type SampleFormat,
+  bytesOf,
+  firstNonFinite,
+  isWav,
+  readWav,
+  sampleBytes,
+  samplesOf,
+} from "./audio.js";
 import type { Brand } from "./brand.js";
 import { type Decimal, normalizeDecimal } from "./decimal.js";
 import { Int64, parseInt64 } from "./int64.js";
-import { type DecodeError, type Result, err, ok } from "./result.js";
+import { type DecodeError, type DecodeRule, type Result, err, ok } from "./result.js";
 import { Text, type TextForm, decodeText } from "./text.js";
 import { type Zoned, normalizeZoned } from "./zoned.js";
 
@@ -21,23 +33,35 @@ class Failure {
   constructor(
     readonly expected: string,
     readonly actual: string,
+    readonly rule: DecodeRule = "type",
   ) {}
 }
 
 type Step<T> = T | Failure;
 
-/** What `encode` produces: a value `JSON.stringify` accepts and round-trips through `decode`. */
+/**
+ * What `encode` produces: a value `JSON.stringify` accepts and that round-trips
+ * through `decode`. Binary types encode to what `WebSocket.send` and
+ * `postMessage` take: `Pcm` to its little-endian sample bytes, `Bytes` to itself,
+ * `Planar` to its channel arrays.
+ */
 export type Encoded<T> = T extends bigint
   ? string
-  : T extends Brand<string>
-    ? string
-    : T extends string | number | boolean | null | undefined
-      ? T
-      : T extends readonly (infer U)[]
-        ? Encoded<U>[]
-        : T extends object
-          ? { [K in keyof T]: Encoded<T[K]> }
-          : T;
+  : T extends Pcm<SampleFormat, number, number>
+    ? ArrayBuffer
+    : T extends Planar<"float32", number>
+      ? Float32Array[]
+      : T extends Bytes
+        ? Uint8Array<ArrayBuffer>
+        : T extends Brand<string>
+          ? string
+          : T extends string | number | boolean | null | undefined
+            ? T
+            : T extends readonly (infer U)[]
+              ? Encoded<U>[]
+              : T extends object
+                ? { [K in keyof T]: Encoded<T[K]> }
+                : T;
 
 export interface Decoder<T> {
   /** What this decoder accepts, as reported in `DecodeError.expected`. */
@@ -102,6 +126,7 @@ function finish<T>(step: Step<T>): Result<T, DecodeError> {
     path: step.reversedPath.slice().reverse(),
     expected: step.expected,
     actual: step.actual,
+    rule: step.rule,
   });
 }
 
@@ -135,7 +160,7 @@ function parseJson(text: unknown): Failure | { value: unknown } {
   try {
     return { value: JSON.parse(text) as unknown };
   } catch {
-    return new Failure("JSON", "malformed JSON");
+    return new Failure("JSON", "malformed JSON", "json");
   }
 }
 
@@ -183,14 +208,14 @@ function set(out: Record<string, unknown>, key: string, value: unknown): void {
   }
 }
 
-function fail(expected: string, actual: string, segment: string): Failure {
-  const f = new Failure(expected, actual);
+function fail(expected: string, actual: string, segment: string, rule: DecodeRule): Failure {
+  const f = new Failure(expected, actual, rule);
   f.reversedPath.push(segment);
   return f;
 }
 
 function tooDeep(): Failure {
-  return new Failure(`nesting depth <= ${MAX_DEPTH}`, "deeper nesting");
+  return new Failure(`nesting depth <= ${MAX_DEPTH}`, "deeper nesting", "depth");
 }
 
 function writeAt<T>(d: Decoder<T>, value: T, segment: string): unknown {
@@ -220,7 +245,7 @@ const null_ = primitive("null", (v): v is null => v === null);
 const number = make<number>(
   () => "number",
   (v) =>
-    typeof v === "number" && Number.isFinite(v) ? v : new Failure("number", typeof v === "number" ? "number (non-finite)" : describe(v)),
+    typeof v === "number" ? (Number.isFinite(v) ? v : new Failure("number", "number (non-finite)", "nonFinite")) : new Failure("number", describe(v)),
   identity,
 );
 
@@ -229,10 +254,10 @@ const int64 = make<Int64>(
   (v) => {
     if (typeof v === "number") {
       if (Number.isSafeInteger(v)) return BigInt(v);
-      return new Failure("int64", Number.isInteger(v) ? "number (unsafe integer)" : "number (not an integer)");
+      return new Failure("int64", Number.isInteger(v) ? "number (unsafe integer)" : "number (not an integer)", Number.isInteger(v) ? "range" : "value");
     }
-    if (typeof v === "string") return parseInt64(v) ?? new Failure("int64", "string (not a canonical int64)");
-    if (typeof v === "bigint") return Int64.inRange(v) ? v : new Failure("int64", "bigint (out of range)");
+    if (typeof v === "string") return parseInt64(v) ?? new Failure("int64", "string (not a canonical int64)", "value");
+    if (typeof v === "bigint") return Int64.inRange(v) ? v : new Failure("int64", "bigint (out of range)", "range");
     return new Failure("int64", describe(v));
   },
   (v) => {
@@ -244,7 +269,7 @@ const int64 = make<Int64>(
 const decimal = make<Decimal>(
   () => "decimal",
   (v) =>
-    typeof v === "string" ? (normalizeDecimal(v) ?? new Failure("decimal", "string (not a decimal)")) : new Failure("decimal", describe(v)),
+    typeof v === "string" ? (normalizeDecimal(v) ?? new Failure("decimal", "string (not a decimal)", "value")) : new Failure("decimal", describe(v)),
   identity,
 );
 
@@ -252,7 +277,7 @@ const zoned = make<Zoned>(
   () => "zoned",
   (v) =>
     typeof v === "string"
-      ? (normalizeZoned(v) ?? new Failure("zoned", "string (not ISO 8601 with an offset)"))
+      ? (normalizeZoned(v) ?? new Failure("zoned", "string (not ISO 8601 with an offset)", "value"))
       : new Failure("zoned", describe(v)),
   identity,
 );
@@ -260,7 +285,7 @@ const zoned = make<Zoned>(
 function text<F extends TextForm>(f: F): Decoder<Text<F>> {
   return make<Text<F>>(
     () => "text",
-    (v) => (typeof v === "string" ? (decodeText(v, f) ?? new Failure("text", "string (lone surrogate)")) : new Failure("text", describe(v))),
+    (v) => (typeof v === "string" ? (decodeText(v, f) ?? new Failure("text", "string (lone surrogate)", "value")) : new Failure("text", describe(v))),
     identity,
   );
 }
@@ -269,7 +294,7 @@ function literal<const L extends readonly (string | number)[]>(...values: L): Li
   const expected = values.map((v) => JSON.stringify(v)).join(" | ");
   return make<L[number], { values: L }>(
     () => expected,
-    (v) => (values.includes(v as L[number]) ? (v as L[number]) : new Failure(expected, describeLiteral(v))),
+    (v) => (values.includes(v as L[number]) ? (v as L[number]) : new Failure(expected, describeLiteral(v), values.some((x) => typeof x === typeof v) ? "value" : "type")),
     identity,
     { values },
   );
@@ -285,7 +310,7 @@ function array<T>(item: Decoder<T>): Decoder<T[]> {
       const run = item[RUN];
       for (let i = 0; i < v.length; i++) {
         const raw = readIndex(v, i);
-        if (raw === UNREADABLE) return fail(item.expected, "unreadable", String(i));
+        if (raw === UNREADABLE) return fail(item.expected, "unreadable", String(i), "unreadable");
         const r = run(raw, depth + 1);
         if (r instanceof Failure) {
           r.reversedPath.push(String(i));
@@ -321,7 +346,7 @@ function nullable<T>(inner: Decoder<T>): Decoder<T | null> {
       // A type mismatch at this level should say that null was also acceptable.
       // Other failures here (the depth limit) keep their own message.
       if (r instanceof Failure && r.reversedPath.length === 0 && r.expected === inner.expected) {
-        return new Failure(`${inner.expected} | null`, r.actual);
+        return new Failure(`${inner.expected} | null`, r.actual, r.rule);
       }
       return r;
     },
@@ -335,17 +360,17 @@ function nullable<T>(inner: Decoder<T>): Decoder<T | null> {
  * given to `encode` throws EncodeRangeError, since it would not decode again.
  * A mismatch of `inner` itself reports this decoder's expectation.
  */
-function constrained<T>(inner: Decoder<T>, rule: string, test: (value: T) => string | undefined): Decoder<T> {
+function constrained<T>(inner: Decoder<T>, rule: string, kind: DecodeRule, test: (value: T) => string | undefined): Decoder<T> {
   const expected = `${inner.expected} ${rule}`;
   return make<T>(
     () => expected,
     (v, depth) => {
       const r = inner[RUN](v, depth);
       if (r instanceof Failure) {
-        return r.reversedPath.length === 0 && r.expected === inner.expected ? new Failure(expected, r.actual) : r;
+        return r.reversedPath.length === 0 && r.expected === inner.expected ? new Failure(expected, r.actual, r.rule) : r;
       }
       const problem = test(r);
-      return problem === undefined ? r : new Failure(expected, problem);
+      return problem === undefined ? r : new Failure(expected, problem, kind);
     },
     (value) => {
       const problem = test(value);
@@ -360,21 +385,133 @@ function matches<T extends string>(inner: Decoder<T>, pattern: RegExp): Decoder<
   // `test` with the g or y flag advances lastIndex, so one value's result would depend on the previous one.
   const re = pattern.global || pattern.sticky ? new RegExp(pattern.source, pattern.flags.replace(/[gy]/g, "")) : pattern;
   // The value itself is not reported: it may be personal data.
-  return constrained(inner, `matching ${pattern}`, (v) => (re.test(v) ? undefined : `${inner.expected} (no match)`));
+  return constrained(inner, `matching ${pattern}`, "pattern", (v) => (re.test(v) ? undefined : `${inner.expected} (no match)`));
 }
 
-/** `minLength` / `maxLength` on a Text field (grapheme clusters) or an array field (elements). */
-function length<T extends string | readonly unknown[]>(inner: Decoder<T>, min: number, max: number = Infinity): Decoder<T> {
+/**
+ * `minLength` / `maxLength`: grapheme clusters of a Text, elements of an array,
+ * bytes of `Bytes`, frames (samples per channel) of `Pcm` and `Planar`.
+ */
+function length<T extends string | { readonly length: number } | { readonly frames: number }>(inner: Decoder<T>, min: number, max: number = Infinity): Decoder<T> {
   const rule = max === Infinity ? `of length ${min} or more` : min === 0 ? `of length ${max} or less` : `of length ${min}..${max}`;
-  return constrained(inner, rule, (v) => {
-    const n = typeof v === "string" ? Text.length(v as Text<TextForm>) : v.length;
+  return constrained(inner, rule, "length", (v) => {
+    const x: string | { readonly length: number } | { readonly frames: number } = v;
+    const n = typeof x === "string" ? Text.length(x as Text<TextForm>) : "frames" in x ? x.frames : x.length;
     return n >= min && n <= max ? undefined : `length ${n}`;
   });
 }
 
 /** `in A..B` on a number or Int64 field: both ends included. */
 function range<T extends number | bigint>(inner: Decoder<T>, min: T, max: T): Decoder<T> {
-  return constrained(inner, `in ${min}..${max}`, (v) => (v >= min && v <= max ? undefined : `${inner.expected} (out of range)`));
+  return constrained(inner, `in ${min}..${max}`, "range", (v) => (v >= min && v <= max ? undefined : `${inner.expected} (out of range)`));
+}
+
+// Binary inputs are named by their class, never by their contents.
+function describeBinary(v: unknown): string {
+  if (v instanceof ArrayBuffer) return "ArrayBuffer";
+  if (ArrayBuffer.isView(v)) return v.buffer instanceof ArrayBuffer ? v.constructor.name : `${v.constructor.name} over a SharedArrayBuffer`;
+  if (typeof SharedArrayBuffer === "function" && v instanceof SharedArrayBuffer) return "SharedArrayBuffer";
+  return describe(v);
+}
+
+/**
+ * The bytes of an ArrayBuffer or of a view (TypedArray, DataView) on one, without
+ * copying. Shared memory is refused: another thread could change it after the check.
+ */
+function bytesIn(v: unknown): Uint8Array<ArrayBuffer> | undefined {
+  if (v instanceof ArrayBuffer) return new Uint8Array(v);
+  if (ArrayBuffer.isView(v) && v.buffer instanceof ArrayBuffer) {
+    return v instanceof Uint8Array ? (v as Uint8Array<ArrayBuffer>) : new Uint8Array(v.buffer, v.byteOffset, v.byteLength);
+  }
+  return undefined;
+}
+
+const bytes = make<Bytes>(
+  () => "bytes",
+  (v) => (bytesIn(v) as Bytes | undefined) ?? new Failure("bytes", describeBinary(v)),
+  (value) => value,
+);
+
+const WAV_FORMATS: Record<SampleFormat, { code: number; bits: number; name: string }> = {
+  int16: { code: 1, bits: 16, name: "16-bit integer PCM" },
+  float32: { code: 3, bits: 32, name: "32-bit float PCM" },
+};
+
+/**
+ * `Pcm<Int16 | Float32, Rate, Channels>`: interleaved little-endian samples, as
+ * bytes (ArrayBuffer, any view) or as the typed array of the format, or a WAV
+ * file whose header must match the declaration. Plain bytes carry no sample rate
+ * or channel count, so for them only the frame alignment can be checked.
+ */
+function pcm<F extends SampleFormat, R extends number, C extends number>(format: F, sampleRate: R, channels: C): Decoder<Pcm<F, R, C>> {
+  const size = sampleBytes(format);
+  const frame = size * channels;
+  const expected = `pcm ${format} ${sampleRate} Hz ${channels}ch`;
+  const wav = WAV_FORMATS[format];
+  const SampleArray = format === "int16" ? Int16Array : Float32Array;
+  return make<Pcm<F, R, C>>(
+    () => expected,
+    (v) => {
+      let samples: Int16Array<ArrayBuffer> | Float32Array<ArrayBuffer>;
+      if (v instanceof SampleArray && v.buffer instanceof ArrayBuffer) {
+        // Samples already in the declared format, as posted from an AudioWorklet.
+        if (v.length % channels !== 0) return new Failure(expected, `${v.length} samples, not a whole number of ${channels}-channel frames`, "frameAlignment");
+        samples = v as Int16Array<ArrayBuffer> | Float32Array<ArrayBuffer>;
+      } else {
+        let data = bytesIn(v);
+        if (data === undefined) return new Failure(expected, describeBinary(v));
+        if (isWav(data)) {
+          const info = readWav(data);
+          if (typeof info === "string") return new Failure(expected, info, "format");
+          if (info.formatCode !== wav.code || info.bitsPerSample !== wav.bits) {
+            return new Failure(expected, `wav of format ${info.formatCode}, ${info.bitsPerSample}-bit (expected ${wav.name})`, "format");
+          }
+          if (info.sampleRate !== sampleRate) return new Failure(expected, `wav at ${info.sampleRate} Hz`, "sampleRate");
+          if (info.channels !== channels) return new Failure(expected, `wav with ${info.channels} channels`, "channels");
+          data = info.data;
+        }
+        if (data.byteLength % frame !== 0) return new Failure(expected, `${data.byteLength} bytes, not a whole number of ${frame}-byte frames`, "frameAlignment");
+        samples = samplesOf(format, data);
+      }
+      if (format === "float32") {
+        const at = firstNonFinite(samples as Float32Array);
+        if (at !== -1) return new Failure(expected, `a non-finite sample at frame ${Math.floor(at / channels)}`, "nonFinite");
+      }
+      return { format, sampleRate, channels, frames: samples.length / channels, samples } as unknown as Pcm<F, R, C>;
+    },
+    (value) => {
+      if (value.samples.length % channels !== 0) throw new EncodeRangeError(`Expected ${expected}, got ${value.samples.length} samples`);
+      return bytesOf(value.samples);
+    },
+  );
+}
+
+/**
+ * `Planar<Float32, Channels>`: an array of one Float32Array per channel, all the
+ * same length, such as `inputs[0]` in an AudioWorklet's `process`. The arrays
+ * are wrapped, not copied. An input that is not connected has no channels, and
+ * fails with rule "channels".
+ */
+function planar<F extends "float32", C extends number>(format: F, channels: C): Decoder<Planar<F, C>> {
+  const expected = `planar ${format} ${channels}ch`;
+  return make<Planar<F, C>>(
+    () => expected,
+    (v) => {
+      if (!Array.isArray(v)) return new Failure(expected, describe(v));
+      if (v.length !== channels) return new Failure(expected, `${v.length} channel${v.length === 1 ? "" : "s"}`, "channels");
+      let frames = -1;
+      for (let i = 0; i < channels; i++) {
+        const ch = readIndex(v, i);
+        if (ch === UNREADABLE) return fail("float32 samples", "unreadable", String(i), "unreadable");
+        if (!(ch instanceof Float32Array) || !(ch.buffer instanceof ArrayBuffer)) return fail("float32 samples", describeBinary(ch), String(i), "type");
+        if (frames === -1) frames = ch.length;
+        else if (ch.length !== frames) return fail(`${frames} samples`, `${ch.length} samples`, String(i), "frameAlignment");
+        if (firstNonFinite(ch) !== -1) return fail("finite float32 samples", "a non-finite sample", String(i), "nonFinite");
+      }
+      return { format, channels: v, frames: Math.max(frames, 0) } as unknown as Planar<F, C>;
+    },
+    (value) => [...value.channels],
+  );
 }
 
 /** For recursive boundaries: the decoder is looked up on first use, after the module has initialized. */
@@ -406,13 +543,13 @@ function object<T extends object>(shape: ObjectShape<T>): ObjectDecoder<T> {
       for (let i = 0; i < n; i++) {
         const key = keys[i]!;
         const raw = readOwn(v, key);
-        if (raw === UNREADABLE) return fail(decoders[i]!.expected, "unreadable", key);
+        if (raw === UNREADABLE) return fail(decoders[i]!.expected, "unreadable", key, "unreadable");
         if (optional[i]) {
           // `name?:` allows the key to be absent, not null. An own `undefined`
           // (possible through postMessage, not JSON) counts as absent.
           if (raw === ABSENT || raw === undefined) continue;
         } else if (raw === ABSENT) {
-          return fail(decoders[i]!.expected, "missing", key);
+          return fail(decoders[i]!.expected, "missing", key, "missing");
         }
         const r = runs[i]!(raw, depth + 1);
         if (r instanceof Failure) {
@@ -502,10 +639,10 @@ function union<T extends object>(keyOrMembers: string | Members, maybeMembers?: 
       const t = build();
       if (typeof v !== "object" || v === null || Array.isArray(v)) return new Failure("object", describe(v));
       const raw = readOwn(v, key);
-      if (raw === UNREADABLE) return fail(expectedTag, "unreadable", key);
-      if (raw === ABSENT) return fail(expectedTag, "missing", key);
+      if (raw === UNREADABLE) return fail(expectedTag, "unreadable", key, "unreadable");
+      if (raw === ABSENT) return fail(expectedTag, "missing", key, "missing");
       const member = typeof raw === "string" || typeof raw === "number" ? t.get(raw) : undefined;
-      if (member === undefined) return fail(expectedTag, describeLiteral(raw), key);
+      if (member === undefined) return fail(expectedTag, describeLiteral(raw), key, typeof raw === "string" || typeof raw === "number" ? "value" : "type");
       return member[RUN](v, depth) as Step<T>;
     },
     (value) => {
@@ -538,6 +675,9 @@ export const __b = {
   matches,
   length,
   range,
+  bytes,
+  pcm,
+  planar,
 } as const;
 
 /** Compiled form of `decode X from v`. */

@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SeamScript voice round trip</title>
+    <style>
+      body { font: 15px/1.5 system-ui, sans-serif; margin: 2rem auto; max-width: 40rem; padding: 0 1rem; }
+      dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 1rem; }
+      dt { color: #555; }
+      [data-testid="problem"]:empty { display: none; }
+      [data-testid="problem"] { color: #a00; }
+    </style>
+  </head>
+  <body>
+    <h1>Voice round trip</h1>
+    <p>Your microphone goes to the server as numbered 16 kHz Int16 PCM chunks over a WebSocket; the server sends them back, each is checked against a hash of what was sent, and it is played after a short delay. Use headphones.</p>
+    <p><button data-testid="start">Start</button> <button data-testid="stop" disabled>Stop</button></p>
+    <dl>
+      <dt>Status</dt><dd data-testid="status">idle</dd>
+      <dt>Microphone</dt><dd data-testid="mic">-</dd>
+      <dt>Sent</dt><dd data-testid="sent">0</dd>
+      <dt>Received</dt><dd data-testid="received">0</dd>
+      <dt>Rejected</dt><dd data-testid="rejected">0</dd>
+      <dt>Came back intact</dt><dd data-testid="matched">0</dd>
+      <dt>Came back different</dt><dd data-testid="mismatched">0</dd>
+      <dt>Output level</dt><dd data-testid="level">-</dd>
+    </dl>
+    <p data-testid="problem"></p>
+    <script type="module" src="/src/main.seam.ts"></script>
+  </body>
+</html>

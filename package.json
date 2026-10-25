@@ -10,7 +10,7 @@
     "build": "yarn workspace @seamscript/runtime build && yarn workspace @seamscript/react build && yarn workspace @seamscript/core build && yarn workspace @seamscript/parser build && yarn workspace @seamscript/compiler build && yarn workspace @seamscript/ts-plugin build && yarn workspace seamscript build",
     "test": "yarn -s build && yarn workspace @seamscript/runtime test && yarn workspace @seamscript/react test && yarn workspace @seamscript/core test && yarn workspace @seamscript/parser test && yarn workspace @seamscript/compiler test && yarn workspace @seamscript/ts-plugin test && yarn workspace seamscript test && yarn workspace create-seamscript test && yarn -s demo",
     "demo": "node demo/run.mjs",
-    "sandbox": "yarn -s build && yarn workspace @seamscript-sandbox/backend test && yarn workspace @seamscript-sandbox/app run check && yarn workspace @seamscript-sandbox/e2e test",
+    "sandbox": "yarn -s build && yarn workspace @seamscript-sandbox/backend test && yarn workspace @seamscript-sandbox/app run check && yarn workspace @seamscript-sandbox/voice run check && yarn workspace @seamscript-sandbox/e2e test",
     "sandbox:bench": "node sandbox/bench/scripts/run.ts && node sandbox/bench/scripts/check-budgets.ts"
   }
 }

@@ -17,7 +17,7 @@ The tools are in the repository's `shell.nix`, and the browsers in `sandbox/e2e/
 nix-shell sandbox/e2e/shell.nix --run 'yarn install --frozen-lockfile && yarn sandbox'
 ```
 
-`yarn sandbox` builds the packages, runs the mock backend's unit tests, runs `seamc check` on the app, builds both apps, and runs the E2E tests (93 across 3 browsers), in that order.
+`yarn sandbox` builds the packages, runs the mock backend's unit tests, runs `seamc check` on the app and the voice sample, builds the apps, and runs the E2E tests (102 across 3 browsers, 5 of them skipped; see [Voice sample](#voice-sample)), in that order.
 
 ```bash
 nix-shell sandbox/e2e/shell.nix --run 'yarn sandbox:bench'
@@ -39,6 +39,8 @@ nix-shell --run 'yarn workspace @seamscript-sandbox/app dev'
 
 The dev server doesn't load the WASM core; the app runs on the browser's ICU (shown in the top-right corner of the screen). To see the production build, start the backend with `--static /=sandbox/app/dist` and open its port.
 
+The voice sample runs the same way, with the backend from above: `nix-shell --run 'yarn workspace @seamscript-sandbox/voice dev'`, then open `/voice/` on the port Vite prints.
+
 ## Layout
 
 | Path | Contents |
@@ -46,6 +48,7 @@ The dev server doesn't load the WASM core; the app runs on the browser's ICU (sh
 | `backend/` | The mock backend. Plain TS that runs as-is with Node's type stripping. Market simulation, HTTP and WebSocket, fault injection, an admin API, and serving the built app |
 | `app/` | The SeamScript app (React 19 + Vite 8). Every source file is `.seam.ts` / `.seam.tsx` |
 | `app-ts/` | The same app in TypeScript strict + Zod 4. Used only as the baseline for performance comparisons |
+| `voice/` | A minimal voice round trip: microphone audio to the backend's WebSocket echo and back, played as it returns (see [Voice sample](#voice-sample)) |
 | `e2e/` | Playwright E2E tests. Each worker starts its own backend and switches faults through the admin API |
 | `bench/` | Benchmarks: decode and Text microbenchmarks (Node and 3 browsers), start-up time, latency, `seamc check` time, bundle size, budgets |
 
@@ -82,6 +85,26 @@ The language guarantees two things: everything from outside goes through decode,
 - If nothing arrives for 3.5 seconds, the connection is treated as dead even without a close, and the app reconnects with backoff
 - Only the stream writes to the store. POST responses are used only to show "accepted"
 - State updates on every message; notifications to the UI are batched to once per frame
+
+## Voice sample
+
+`voice/` is the smallest frontend of a real-time voice app: it sends microphone audio over a WebSocket and plays what comes back. The backend's `/voice/echo` endpoint returns every message as it is, so what is played is the microphone, delayed by the round trip and a 100 ms buffer. Use headphones.
+
+Each WebSocket frame is a 4-byte little-endian sequence number followed by the samples. The page keeps a SHA-256 of each chunk's samples as sent, and compares it with the samples that come back under the same number. Everything played goes through an AnalyserNode, whose level is sampled every 50 ms while audio is scheduled.
+
+- `src/capture.worklet.seam.ts` runs on the audio thread. The `inputs` of `process` are outside data (`Unknown`), so each block is decoded as `Planar<Float32, 1>` before it is used; before the microphone is connected the input has no channels, and the decode fails instead of the code reading `undefined`. The block is copied before it is posted, since the audio thread reuses its arrays.
+- `src/main.seam.ts` decodes the microphone's actual settings (`MediaStreamTrack.getSettings()` is a source; Firefox doesn't report the sample rate, so the fields are optional), decodes each worklet block as `Pcm<Float32, 16000, 1>`, converts it to Int16 and sends 20 ms chunks with `Chunk.encode(Pcm.of(...))`.
+- What comes back is decoded in two steps: the frame as `Bytes minLength 6 maxLength 3204`, then the samples after the number as `Pcm<Int16, 16000, 1> minLength 1 maxLength 1600`. A message that isn't one (a text frame, too few bytes, an odd number of sample bytes) is counted and shown with its `DecodeError` (`rule: "type"`, `"length"`, `"frameAlignment"`), and the stream goes on.
+
+The E2E tests (`e2e/tests/voice.spec.ts`) give Chromium and Firefox a fake microphone:
+
+| Test | Passes when | Browsers |
+|---|---|---|
+| Round trip | at least 50 chunks came back with the same SHA-256 as sent under their number; every chunk received was compared, with none different, none under an unknown number and none rejected; and at least 10 output-level windows during playback had an RMS above 0.001 | Chromium |
+| A changed chunk | flipping one byte of a chunk after it was hashed gives exactly one mismatch, and the chunks after it match again | Chromium |
+| Rejection | a 3-byte frame, a frame with 3 bytes of samples, and a text frame are rejected with `length`, `frameAlignment` and `type`; a well-formed frame after them is accepted | Chromium, Firefox |
+
+The round trip can't pass on silence: with the microphone samples replaced by zeros, every hash still matches, and the test fails on the output level (0 audible windows). With Chromium's fake microphone (a periodic beep), a run sends about 80 chunks, all matched, and 10–12 of about 30 level windows are audible, with a peak RMS of 0.19. In this environment headless Firefox never starts an AudioContext (it stays `"suspended"` even after a click), and Playwright's WebKit build has no capture device at all, so the tests that need audio are skipped there with that reason.
 
 ## Mock backend
 

@@ -23,6 +23,11 @@ describe("TypeScript's lib", () => {
     ["history state", "history.state"],
     ["cookies", "document.cookie"],
     ["another tab's storage", "(se as StorageEvent).newValue"],
+    ["a response's bytes", "await (await fetch('/x')).arrayBuffer()"],
+    ["a response's byte array", "await (await fetch('/x')).bytes()"],
+    ["a recording chunk's bytes", "await (f as Blob).arrayBuffer()"],
+    ["a file's byte array", "await (f as File).bytes()"],
+    ["a microphone's actual settings", "(r as MediaStreamTrack).getSettings()"],
   ])("%s", (_, expr) => {
     const source = `export async function f(r: unknown, c: unknown, e: unknown, f: unknown, fr: unknown, se: unknown) {\n  const x: string | null = ${expr};\n  return x;\n}\n`;
     expect(codes({ "a.seam.ts": source })).toEqual([["a.seam.ts", 2, "TS2322"]]);
@@ -44,6 +49,67 @@ describe("TypeScript's lib", () => {
 
   it("does not mark writes", () => {
     expect(codes({ "a.seam.ts": "location.hash = '#a';\ndocument.cookie = 'a=1';\ndocument.cookie += ';b=2';\n" })).toEqual([]);
+  });
+});
+
+describe("audio", () => {
+  const worklet = [
+    "declare class AudioWorkletProcessor { readonly port: MessagePort; }",
+    "declare function registerProcessor(name: string, ctor: new () => AudioWorkletProcessor): void;",
+    "",
+  ].join("\n");
+
+  it("makes each input of an AudioWorklet's process Unknown, to be decoded as Planar", () => {
+    const source = [
+      worklet,
+      "export class Capture extends AudioWorkletProcessor {",
+      "  process(inputs: Float32Array[][]) {",
+      "    const raw: Float32Array[] = inputs[0]!;",
+      "    const q = decode Planar<Float32, 1> from inputs[0];",
+      "    if (q.ok) this.port.postMessage(q.value.channels[0].slice());",
+      "    return inputs.length > 0;",
+      "  }",
+      "}",
+      "registerProcessor('capture', Capture);",
+      "",
+    ].join("\n");
+    expect(codes({ "w.seam.ts": source })).toEqual([["w.seam.ts", 6, "TS2740"]]);
+  });
+
+  it("refuses destructured inputs, which could not be tracked", () => {
+    const source = `${worklet}export class C extends AudioWorkletProcessor {\n  process([input]: Float32Array[][]) { return input !== undefined; }\n}\n`;
+    expect(codes({ "w.seam.ts": source })).toEqual([["w.seam.ts", 4, "SEAM2004"]]);
+  });
+
+  it("leaves process alone in other classes, and other parameters", () => {
+    const source = [
+      worklet,
+      "class Other { process(inputs: Float32Array[][]) { const a: Float32Array[] = inputs[0]!; return a; } }",
+      "export class C extends AudioWorkletProcessor {",
+      "  process(inputs: Float32Array[][], outputs: Float32Array[][]) { outputs[0]![0]!.fill(0); return inputs.length > 0; }",
+      "}",
+      "export { Other };",
+      "",
+    ].join("\n");
+    expect(codes({ "w.seam.ts": source })).toEqual([]);
+  });
+
+  it("decodes microphone settings and binary messages through boundaries", () => {
+    const source = [
+      "boundary MicSettings { sampleRate: number in 8000..192000, channelCount?: 1 | 2 }",
+      "boundary MicChunk = Pcm<Int16, 16000, 1> maxLength 3200",
+      "export function f(track: MediaStreamTrack, ws: WebSocket) {",
+      "  const settings = decode MicSettings from track.getSettings();",
+      "  ws.onmessage = (e) => {",
+      "    const chunk = decode MicChunk from e.data;",
+      "    if (chunk.ok && settings.ok) console.log(chunk.value.frames, settings.value.sampleRate);",
+      "  };",
+      "  const rate: number | undefined = track.getSettings().sampleRate;",
+      "  return rate;",
+      "}",
+      "",
+    ].join("\n");
+    expect(codes({ "a.seam.ts": source })).toEqual([["a.seam.ts", 9, "TS2339"]]);
   });
 });
 
