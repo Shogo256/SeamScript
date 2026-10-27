@@ -13,6 +13,8 @@ boundary Block = Pcm<Float32, 16000, 1> maxLength 4096
 boundary Frame = Bytes minLength 6 maxLength 3204
 boundary Chunk = Pcm<Int16, 16000, 1> minLength 1 maxLength 1600
 const HEADER = 4;
+// Another echo server to talk to, such as Throughline's, given as `?echo=ws://host:port`.
+boundary EchoUrl = string matches /^wss?:\/\/\S+$/
 
 // The output level is sampled this often while audio is scheduled; above this RMS a window counts as audible.
 const LEVEL_EVERY_MS = 50;
@@ -59,8 +61,18 @@ function describe(e: DecodeError): string {
   return `${e.path.length > 0 ? `${e.path.join(".")}: ` : ""}expected ${e.expected}, got ${e.actual} (${e.rule})`;
 }
 
+/** The `echo` query parameter if there is one, else the backend's own `/voice/echo`. */
+function echoUrl(): string {
+  const given = new URLSearchParams(location.search).get("echo");
+  if (given === null) return new URL("echo", location.href.replace(/^http/, "ws")).href;
+  const url = decode EchoUrl from given;
+  if (!url.ok) throw new Error(`The echo parameter: ${describe(url.error)}`);
+  return url.value;
+}
+
 async function start(): Promise<void> {
   $("status").textContent = "starting";
+  const echo = echoUrl();
   // Made before the first await, while the click still counts as a user gesture:
   // otherwise the browser may keep the context suspended. The browser resamples
   // the microphone into its 16 kHz.
@@ -75,7 +87,7 @@ async function start(): Promise<void> {
   ctx.createMediaStreamSource(stream).connect(capture);
   void ctx.resume();
 
-  const ws = new WebSocket(new URL("echo", location.href.replace(/^http/, "ws")));
+  const ws = new WebSocket(echo);
   ws.binaryType = "arraybuffer";
 
   // Everything played goes through the analyser, so its level is the level of what came back.

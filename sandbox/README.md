@@ -17,7 +17,7 @@ The tools are in the repository's `shell.nix`, and the browsers in `sandbox/e2e/
 nix-shell sandbox/e2e/shell.nix --run 'yarn install --frozen-lockfile && yarn sandbox'
 ```
 
-`yarn sandbox` builds the packages, runs the mock backend's unit tests, runs `seamc check` on the app and the voice sample, builds the apps, and runs the E2E tests (102 across 3 browsers, 5 of them skipped; see [Voice sample](#voice-sample)), in that order.
+`yarn sandbox` builds the packages, runs the mock backend's unit tests, runs `seamc check` on the app and the voice sample, builds the apps, and runs the E2E tests (105 across 3 browsers, 7 of them skipped; see [Voice sample](#voice-sample)), in that order.
 
 ```bash
 nix-shell sandbox/e2e/shell.nix --run 'yarn sandbox:bench'
@@ -96,13 +96,20 @@ Each WebSocket frame is a 4-byte little-endian sequence number followed by the s
 - `src/main.seam.ts` decodes the microphone's actual settings (`MediaStreamTrack.getSettings()` is a source; Firefox doesn't report the sample rate, so the fields are optional), decodes each worklet block as `Pcm<Float32, 16000, 1>`, converts it to Int16 and sends 20 ms chunks with `Chunk.encode(Pcm.of(...))`.
 - What comes back is decoded in two steps: the frame as `Bytes minLength 6 maxLength 3204`, then the samples after the number as `Pcm<Int16, 16000, 1> minLength 1 maxLength 1600`. A message that isn't one (a text frame, too few bytes, an odd number of sample bytes) is counted and shown with its `DecodeError` (`rule: "type"`, `"length"`, `"frameAlignment"`), and the stream goes on.
 
+The page can talk to another echo server instead of the backend's, such as Throughline's Rust one: `/voice/?echo=ws://127.0.0.1:9000`. The parameter is outside data too, decoded as `string matches /^wss?:\/\/\S+$/`. The E2E tests take that address from `VOICE_ECHO_URL`:
+
+```bash
+nix-shell sandbox/e2e/shell.nix --run 'yarn --cwd sandbox/voice build && cd sandbox/e2e && VOICE_ECHO_URL=ws://127.0.0.1:9000 npx playwright test tests/voice.spec.ts'
+```
+
 The E2E tests (`e2e/tests/voice.spec.ts`) give Chromium and Firefox a fake microphone:
 
 | Test | Passes when | Browsers |
 |---|---|---|
 | Round trip | at least 50 chunks came back with the same SHA-256 as sent under their number; every chunk received was compared, with none different, none under an unknown number and none rejected; and at least 10 output-level windows during playback had an RMS above 0.001 | Chromium |
 | A changed chunk | flipping one byte of a chunk after it was hashed gives exactly one mismatch, and the chunks after it match again | Chromium |
-| Rejection | a 3-byte frame, a frame with 3 bytes of samples, and a text frame are rejected with `length`, `frameAlignment` and `type`; a well-formed frame after them is accepted | Chromium, Firefox |
+| Rejection | a 3-byte frame, a frame with 3 bytes of samples, and a text frame are rejected with `length`, `frameAlignment` and `type`; a well-formed frame after them is accepted. An echo server that drops messages shorter than the sequence number and text messages, as Throughline's does, returns only the frame with 3 bytes of samples, which is rejected with `frameAlignment` | Chromium, Firefox |
+| 15-second window | after streaming for a fixed 15 seconds, at least 50 chunks matched and 10 level windows were audible, with none different, none under an unknown number and none rejected. The counts are recorded as an annotation, to compare echo servers | Chromium |
 
 The round trip can't pass on silence: with the microphone samples replaced by zeros, every hash still matches, and the test fails on the output level (0 audible windows). With Chromium's fake microphone (a periodic beep), a run sends about 80 chunks, all matched, and 10–12 of about 30 level windows are audible, with a peak RMS of 0.19. In this environment headless Firefox never starts an AudioContext (it stays `"suspended"` even after a click), and Playwright's WebKit build has no capture device at all, so the tests that need audio are skipped there with that reason.
 
