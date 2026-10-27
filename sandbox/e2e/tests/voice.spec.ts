@@ -3,6 +3,10 @@
 import type { Page } from "@playwright/test";
 import { expect, test } from "../support/fixtures";
 
+// Another echo server to run against, such as Throughline's (`ws://127.0.0.1:9000`);
+// without it, the backend's own /voice/echo.
+const echoUrl = process.env["VOICE_ECHO_URL"];
+
 test.describe("Voice round trip", () => {
   // Chromium and Firefox get a fake microphone (playwright.config.ts); Playwright's
   // WebKit build has no capture device at all (enumerateDevices() is empty).
@@ -22,7 +26,7 @@ test.describe("Voice round trip", () => {
     }, what);
 
   const startLive = async (page: Page) => {
-    await page.goto("/voice/");
+    await page.goto(echoUrl === undefined ? "/voice/" : `/voice/?echo=${encodeURIComponent(echoUrl)}`);
     await page.getByTestId("start").click();
     await expect(page.getByTestId("status")).toHaveText("live");
   };
@@ -71,19 +75,46 @@ test.describe("Voice round trip", () => {
   test("Frames that are not numbered 16 kHz Int16 chunks are rejected with a typed error, and the stream goes on", async ({ page, backend }) => {
     void backend;
     await startLive(page);
-    await sendRaw(page, { bytes: 3 });
-    await expect(page.getByTestId("problem")).toHaveText("Rejected a message: expected bytes of length 6..3204, got length 3 (length)");
-    await sendRaw(page, { seq: 1_000_000, payloadBytes: 3 });
-    await expect(page.getByTestId("problem")).toHaveText(
-      "Rejected a message: expected pcm int16 16000 Hz 1ch of length 1..1600, got 3 bytes, not a whole number of 2-byte frames (frameAlignment)",
-    );
-    await sendRaw(page, "text");
-    await expect(page.getByTestId("problem")).toHaveText("Rejected a message: expected bytes of length 6..3204, got string (type)");
-    expect((await stats(page)).rejected).toBe(3);
+    const frameAlignment =
+      "Rejected a message: expected pcm int16 16000 Hz 1ch of length 1..1600, got 3 bytes, not a whole number of 2-byte frames (frameAlignment)";
+    if (echoUrl === undefined) {
+      // The backend's echo returns every message, so the page sees all three.
+      await sendRaw(page, { bytes: 3 });
+      await expect(page.getByTestId("problem")).toHaveText("Rejected a message: expected bytes of length 6..3204, got length 3 (length)");
+      await sendRaw(page, { seq: 1_000_000, payloadBytes: 3 });
+      await expect(page.getByTestId("problem")).toHaveText(frameAlignment);
+      await sendRaw(page, "text");
+      await expect(page.getByTestId("problem")).toHaveText("Rejected a message: expected bytes of length 6..3204, got string (type)");
+    } else {
+      // Throughline drops a binary message shorter than its 4-byte sequence number,
+      // and any text message, so only the frame with 3 bytes of samples comes back.
+      // Echoes keep their order: had the 3-byte frame come back, it would have been
+      // rejected before it, and had the text come back, before the frame below.
+      await sendRaw(page, { bytes: 3 });
+      await sendRaw(page, { seq: 1_000_000, payloadBytes: 3 });
+      await expect(page.getByTestId("problem")).toHaveText(frameAlignment);
+      await sendRaw(page, "text");
+    }
+    const rejected = echoUrl === undefined ? 3 : 1;
+    expect((await stats(page)).rejected).toBe(rejected);
     // A well-formed frame after them still comes back and is accepted; its number was never sent.
     const before = await stats(page);
     await sendRaw(page, { seq: 1_000_000, payloadBytes: 640 });
     await expect.poll(async () => (await stats(page)).unmatched).toBe(before.unmatched + 1);
-    expect((await stats(page)).rejected).toBe(3);
+    expect((await stats(page)).rejected).toBe(rejected);
+  });
+
+  test("Over a fixed 15-second window, chunks come back intact and are heard", async ({ page, backend, browserName }, testInfo) => {
+    test.skip(browserName === "firefox", "Web Audio does not run in headless Firefox here");
+    void backend;
+    await startLive(page);
+    // A fixed window rather than a threshold to wait for, so that the counts can be
+    // compared between echo servers (they are recorded as an annotation).
+    await page.waitForTimeout(15_000);
+    const s = await stats(page);
+    testInfo.annotations.push({ type: "15 s window", description: JSON.stringify({ echo: echoUrl ?? "backend", ...s }) });
+    expect({ mismatched: s.mismatched, unmatched: s.unmatched, rejected: s.rejected }).toEqual({ mismatched: 0, unmatched: 0, rejected: 0 });
+    expect(s.matched).toBeGreaterThanOrEqual(50);
+    expect(s.audibleWindows).toBeGreaterThanOrEqual(10);
   });
 });
