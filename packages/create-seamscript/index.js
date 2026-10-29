@@ -153,7 +153,7 @@ ${body}
 function readme(name) {
   return `# ${name}
 
-A [SeamScript](https://github.com/Escoffier1156/SeamScript) app: data from outside the program is \`Unknown\` until a \`decode\` checks it.
+A [SeamScript](https://github.com/Shogo256/SeamScript) app: data from outside the program is \`Unknown\` until a \`decode\` checks it.
 
 - \`npm run dev\`: start Vite's development server
 - \`npm run check\`: type-check, including SeamScript's rules (\`seamc check\`)
