@@ -382,8 +382,27 @@ export function createChecker(ts: typeof import("typescript"), options: CheckerO
     const checker = program.getTypeChecker();
     const { runtime, brands, unknownIn } = factsFor(program, runtimeFile);
     const findings: Finding[] = [];
+    /** `process.env` itself (as wrapped in pass 1), where an exit was found: the one place a whole Node source is commonly tested or listed. */
+    const isWholeProcessEnv = (node: ts.Node): boolean => {
+      let e: ts.Node = ts.isBinaryExpression(node) ? node.right : ts.isSpreadAssignment(node) || ts.isJsxSpreadAttribute(node) ? node.expression : node;
+      while (ts.isParenthesizedExpression(e)) e = e.expression;
+      if (ts.isCallExpression(e) && ts.isIdentifier(e.expression) && e.expression.text === "__unknown" && e.arguments.length === 1) e = e.arguments[0]!;
+      if (!ts.isPropertyAccessExpression(e) || e.name.text !== "env") return false;
+      const decl = checker.getSymbolAtLocation(e.name)?.declarations?.[0];
+      return decl !== undefined && isNodeTypes(decl.getSourceFile()) && ownerName(decl) === "Process";
+    };
+
+    const ENV_HINT =
+      " To check one variable, decode it: `const port = decode Int64 from process.env.PORT`, then `port.ok`; a variable that isn't set fails to decode (actual: \"undefined\").";
+
     const report = (node: ts.Node, code: string, message: string, fix?: Fix) =>
-      findings.push({ pos: node.getStart(file), end: node.getEnd(), code, message, ...(fix ? { fix } : {}) });
+      findings.push({
+        pos: node.getStart(file),
+        end: node.getEnd(),
+        code,
+        message: code === Codes.unknownFlow && isWholeProcessEnv(node) ? message + ENV_HINT : message,
+        ...(fix ? { fix } : {}),
+      });
 
     // ---- Fixes -------------------------------------------------------------------------
 

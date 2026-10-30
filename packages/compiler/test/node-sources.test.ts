@@ -57,6 +57,23 @@ describe("process.env", () => {
     expect(r.diagnostics.map(([, line, code]) => `${line}:${code}`)).toEqual(["2:TS2339", "3:TS2339", "4:SEAM2001", "7:SEAM2004"]);
   });
 
+  it("testing or listing the whole of process.env says how to check one variable instead", () => {
+    const [config] = project({
+      "tsconfig.json": TSCONFIG,
+      "src/test.seam.ts": 'export const has = "PORT" in process.env;\nexport const keys = Object.keys(process.env);\nexport const other = "a" in JSON.parse("{}");\n',
+    });
+    const r = spawnSync(process.execPath, [seamc, "check", "-p", config!], { cwd: dirname(config!), encoding: "utf8" });
+    const lines = r.stderr.split("\n").filter((l) => l.includes("SEAM2001"));
+    expect(lines).toHaveLength(3);
+    const hint = 'To check one variable, decode it: `const port = decode Int64 from process.env.PORT`, then `port.ok`; a variable that isn\'t set fails to decode (actual: "undefined").';
+    expect(lines[0]).toMatch(/\(1,\d+\): error SEAM2001: Unknown data cannot be tested with `in`; decode it first/);
+    expect(lines[0]).toContain(hint);
+    expect(lines[1]).toMatch(/\(2,\d+\): error SEAM2001: /);
+    expect(lines[1]).toContain(hint);
+    // Only process.env gets the hint.
+    expect(lines[2]).not.toContain(hint);
+  });
+
   it("writing and deleting variables is not reading them", () => {
     const r = check({ "write.seam.ts": 'process.env.PORT = "8080";\nprocess.env["MODE"] ??= "dev";\ndelete process.env.TMP;\nexport {};\n' });
     expect(r.diagnostics).toEqual([]);
