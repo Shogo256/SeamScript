@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterAll, expect, it, vi } from "vitest";
 import ts from "typescript";
@@ -33,6 +33,21 @@ it("build: writes plain TypeScript under the same file name", () => {
   const outDir = join(dirname(file!), "..", "out");
   expect(main(["build", "--outDir", outDir, file!])).toBe(0);
   expect(readFileSync(join(outDir, "order.seam.ts"), "utf8")).toContain("export const Order: __ObjectDecoder<Order>");
+  vi.restoreAllMocks();
+});
+
+it("build writes nothing at all when there is a SeamScript error, even in another file", () => {
+  const errors = quiet();
+  // A rejected construct is still turned into plain TypeScript for the type check
+  // (a placeholder `null!` constant for the boundary); none of that may be written.
+  const [good, bad] = project({
+    "src/good.seam.ts": "export boundary Order { id: Int64 }\n",
+    "src/bad.seam.ts": "export function f() {\n  boundary Inside { a: string }\n  return Inside;\n}\nexport latest async function* g() { yield 1; }\n",
+  });
+  const outDir = join(dirname(good!), "..", "out-failed");
+  expect(main(["build", "--production", "--outDir", outDir, good!, bad!])).toBe(1);
+  expect(existsSync(outDir)).toBe(false);
+  expect(errors.join("\n")).toMatch(/bad\.seam\.ts\(2,3\): error SEAM1102[\s\S]*bad\.seam\.ts\(5,8\): error SEAM1401/);
   vi.restoreAllMocks();
 });
 
