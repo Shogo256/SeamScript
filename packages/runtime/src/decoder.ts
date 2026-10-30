@@ -15,6 +15,7 @@ import { type Decimal, normalizeDecimal } from "./decimal.js";
 import { Int64, parseInt64 } from "./int64.js";
 import { type DecodeError, type DecodeRule, type Result, err, ok } from "./result.js";
 import { Text, type TextForm, decodeText } from "./text.js";
+import { __unbox } from "./unknown.js";
 import { type Zoned, normalizeZoned } from "./zoned.js";
 
 /**
@@ -140,9 +141,9 @@ function make<T, X extends object = {}>(
     get expected() {
       return expected();
     },
-    decode: (input) => finish(run(input, 0)),
+    decode: (input) => finish(run(__unbox(input), 0)),
     decodeJson: (text) => {
-      const parsed = parseJson(text);
+      const parsed = parseJson(__unbox(text));
       return finish(parsed instanceof Failure ? parsed : run(parsed.value, 0));
     },
     encode: (value) => write(value) as Encoded<T>,
