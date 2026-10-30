@@ -1,6 +1,6 @@
 {
   "name": "create-seamscript",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Start a SeamScript app: `npm create seamscript my-app` sets up Vite, seamc check, the WASM core and editor support",
   "keywords": [
     "seamscript",
