@@ -1,6 +1,6 @@
 {
   "name": "@seamscript/ts-plugin",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "TypeScript language service plugin for SeamScript: completions, hover, navigation, rename and SeamScript's diagnostics for .seam.ts files in any editor that runs tsserver",
   "keywords": [
     "seamscript",
@@ -30,7 +30,7 @@
     "access": "public"
   },
   "devDependencies": {
-    "@seamscript/compiler": "0.1.0",
+    "@seamscript/compiler": "0.1.1",
     "@types/node": "24.19.2",
     "@volar/language-core": "2.4.28",
     "@volar/typescript": "2.4.28",

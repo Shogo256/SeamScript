@@ -1,6 +1,6 @@
 {
   "name": "@seamscript/compiler",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "SeamScript compiler: expands .seam.ts into plain TypeScript and checks boundaries",
   "keywords": [
     "seamscript",
@@ -69,13 +69,13 @@
   "dependencies": {
     "@babel/types": "8.0.6",
     "@jridgewell/trace-mapping": "0.3.31",
-    "@seamscript/parser": "0.1.0",
+    "@seamscript/parser": "0.1.1",
     "magic-string": "1.4.3",
     "typescript": "5.9.3",
     "unplugin": "3.4.0"
   },
   "devDependencies": {
-    "@seamscript/runtime": "0.1.0",
+    "@seamscript/runtime": "0.1.1",
     "@types/node": "24.19.2",
     "rollup": "4.64.6",
     "vite": "8.3.4",

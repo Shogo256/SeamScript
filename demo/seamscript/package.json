@@ -8,10 +8,10 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@seamscript/runtime": "0.1.0"
+    "@seamscript/runtime": "0.1.1"
   },
   "devDependencies": {
-    "@seamscript/compiler": "0.1.0",
+    "@seamscript/compiler": "0.1.1",
     "typescript": "5.9.3",
     "vite": "8.3.4",
     "vitest": "5.0.3"

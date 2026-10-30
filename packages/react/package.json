@@ -1,6 +1,6 @@
 {
   "name": "@seamscript/react",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "React bindings for SeamScript: useFork gives a component its own line of a latest function, cancelled on unmount",
   "keywords": [
     "seamscript",
@@ -36,11 +36,11 @@
     "access": "public"
   },
   "peerDependencies": {
-    "@seamscript/runtime": "0.1.0",
+    "@seamscript/runtime": "0.1.1",
     "react": ">=18"
   },
   "devDependencies": {
-    "@seamscript/runtime": "0.1.0",
+    "@seamscript/runtime": "0.1.1",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "happy-dom": "20.14.5",
