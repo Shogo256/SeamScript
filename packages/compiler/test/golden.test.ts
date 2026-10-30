@@ -16,6 +16,11 @@ import { createSeamProgram } from "../src/program.js";
 const repo = new URL("../../../", import.meta.url).pathname;
 const expectedDir = new URL("./golden/expected/", import.meta.url).pathname;
 const update = process.env["UPDATE_GOLDEN"] === "1";
+// Rewriting the expected files passes whatever the output is, so in CI (GitHub
+// Actions sets CI=true) it is refused instead of silently accepting a change.
+if (process.env["UPDATE_GOLDEN"] !== undefined && process.env["CI"] !== undefined && process.env["CI"] !== "false") {
+  throw new Error("UPDATE_GOLDEN is set in CI: the golden files are only rewritten on purpose, locally, and the diff reviewed.");
+}
 
 /** Projects whose output is pinned: the curated cases, and the code written in SeamScript in this repository. */
 const PROJECTS: Record<string, string> = {
