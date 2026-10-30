@@ -199,6 +199,12 @@ describe("any declared by a library", () => {
   });
 });
 
+it("reads the edition, and refuses one it doesn't know", () => {
+  expect(readSeamConfig({ edition: "2026" })).toEqual({ config: { edition: "2026" }, errors: [] });
+  expect(readSeamConfig({ edition: "2027" }).errors).toEqual(['"seamscript.edition" must be one of "2026": the editions this version of seamc knows.']);
+  expect(readSeamConfig({ edition: 2026 }).errors).toHaveLength(1);
+});
+
 it("reads the settings and reports mistakes in them", () => {
   expect(readSeamConfig({ sources: ["A.b", "c"], externalAny: "allow" })).toEqual({ config: { sources: ["A.b", "c"], externalAny: "allow" }, errors: [] });
   expect(readSeamConfig(undefined)).toEqual({ config: {}, errors: [] });

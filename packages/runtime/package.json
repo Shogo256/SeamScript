@@ -1,6 +1,6 @@
 {
   "name": "@seamscript/runtime",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Runtime library for SeamScript: boundary decoders, latest, Text / Int64 / Decimal / Zoned",
   "keywords": [
     "seamscript",
@@ -31,6 +31,16 @@
     "check:spec": "cd spec && nix-shell shell.nix --run 'tlc -deadlock -workers auto -metadir \"${TMPDIR:-/tmp}/seamscript-tlc\" -config latest.cfg latest.tla && tlc -deadlock -workers auto -metadir \"${TMPDIR:-/tmp}/seamscript-tlc-stream\" -config chunkstream.cfg chunkstream.tla'"
   },
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Shogo256/SeamScript.git",
+    "directory": "packages/runtime"
+  },
+  "homepage": "https://github.com/Shogo256/SeamScript/tree/main/packages/runtime#readme",
+  "bugs": "https://github.com/Shogo256/SeamScript/issues",
+  "publishConfig": {
+    "access": "public"
+  },
   "devDependencies": {
     "fast-check": "4.10.2",
     "typescript": "5.9.3",

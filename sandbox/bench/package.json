@@ -9,13 +9,13 @@
     "budgets": "node scripts/check-budgets.ts"
   },
   "dependencies": {
-    "@seamscript/core": "0.0.0",
-    "@seamscript/runtime": "0.0.0",
+    "@seamscript/core": "0.1.0",
+    "@seamscript/runtime": "0.1.0",
     "zod": "4.6.6"
   },
   "devDependencies": {
     "@playwright/test": "1.61.1",
-    "@seamscript/compiler": "0.0.0",
+    "@seamscript/compiler": "0.1.0",
     "@types/node": "24.19.2",
     "typescript": "5.9.3",
     "vite": "8.3.4"

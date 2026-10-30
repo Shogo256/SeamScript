@@ -102,7 +102,7 @@ function tsconfig(template) {
     },
     include: ["src"],
     // SeamScript's own settings: more sources of outside data, library `any`.
-    seamscript: { sources: [], externalAny: "unknown" },
+    seamscript: { edition: "2026", sources: [], externalAny: "unknown" },
   });
 }
 

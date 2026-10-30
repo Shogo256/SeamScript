@@ -1,6 +1,6 @@
 {
   "name": "@seamscript/ts-plugin",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "TypeScript language service plugin for SeamScript: completions, hover, navigation, rename and SeamScript's diagnostics for .seam.ts files in any editor that runs tsserver",
   "keywords": [
     "seamscript",
@@ -19,8 +19,18 @@
     "test": "tsc -p tsconfig.json --noEmit && vitest run"
   },
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Shogo256/SeamScript.git",
+    "directory": "packages/ts-plugin"
+  },
+  "homepage": "https://github.com/Shogo256/SeamScript/tree/main/packages/ts-plugin#readme",
+  "bugs": "https://github.com/Shogo256/SeamScript/issues",
+  "publishConfig": {
+    "access": "public"
+  },
   "devDependencies": {
-    "@seamscript/compiler": "0.0.0",
+    "@seamscript/compiler": "0.1.0",
     "@types/node": "24.19.2",
     "@volar/language-core": "2.4.28",
     "@volar/typescript": "2.4.28",
