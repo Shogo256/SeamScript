@@ -97,7 +97,7 @@ export boundary PaymentEvent = Paid | Refunded`);
     expect(codes("boundary X { f(): void }")).toEqual(["SEAM1103"]);
     expect(codes("boundary X { [k: string]: number }")).toEqual(["SEAM1103"]);
     expect(codes("type T = { a: string };\nboundary X { t: T }")).toEqual(["SEAM1106"]);
-    expect(codes("boundary X { t: Text<NFKC> }")).toEqual(["SEAM1301", "SEAM1301"]);
+    expect(codes("boundary X { t: Text<NFKC> }")).toEqual(["SEAM1301"]);
   });
 
   it("must be top level", () => {

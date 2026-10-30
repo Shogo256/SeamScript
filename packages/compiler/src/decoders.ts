@@ -199,7 +199,8 @@ function referenceDecoder(node: t.TSTypeReference, scope: DecoderScope, site: Si
   if (builtin === "Text") {
     const form = textForm(node);
     if (form !== undefined) return `__b.text("${form}")`;
-    scope.report(node, Codes.textForm, "Text needs its normalization form: Text<NFC> or Text<NFD>.");
+    // A wrong form (Text<NFKC>) is reported where it is written, by the transform; here only a missing one.
+    if (!node.typeArguments) scope.report(node, Codes.textForm, "Text needs its normalization form: Text<NFC> or Text<NFD>.");
     return undefined;
   }
   if (builtin === "Pcm" || builtin === "Planar") return audioDecoder(node, builtin, scope);
