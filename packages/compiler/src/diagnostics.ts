@@ -34,6 +34,8 @@ export const Codes = {
   externalAny: "SEAM2005",
   textCodeUnits: "SEAM2101",
   stringifyBigint: "SEAM2201",
+  /** The editor plugin only: the editor's TypeScript is not the one seamc checks with. */
+  editorTypescript: "SEAM9001",
 } as const;
 
 /** Line and column (both 1-based) of an offset. */

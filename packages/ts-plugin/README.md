@@ -32,6 +32,6 @@ The plugin shows tsserver each `.seam.ts` as the plain TypeScript that `seamc` o
 - The two-pass check that turns outside data into `Unknown` runs on the language service's program, repeating until the wrap positions settle (the program after wrapping finds the same positions, so one retry is enough).
 - When the syntax breaks partway through typing, the plugin applies the current edit to the last state that transformed successfully, so completion and hover types keep working.
 - For a file that has never transformed successfully, it doesn't report TypeScript's errors on SeamScript syntax (there would be a great many); it reports only SeamScript syntax errors.
-- It uses tsserver's own TypeScript (the plugin doesn't bundle TypeScript).
+- It uses tsserver's own TypeScript (the plugin doesn't bundle TypeScript). `seamc` checks with the TypeScript it pins (5.9), so when the editor's major or minor version differs, every `.seam.ts` file gets a warning at the top (SEAM9001): the type errors shown can differ from `seamc check`. In VS Code, "TypeScript: Select TypeScript Version" switches to the workspace's TypeScript.
 
 The tests start the same tsserver that VS Code uses and drive it over its protocol (`test/plugin.test.ts`, `test/sandbox.test.ts`).
