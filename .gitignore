@@ -4,3 +4,4 @@ dist/
 states/
 *.out
 .tmp-*/
+release/

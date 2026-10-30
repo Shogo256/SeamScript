@@ -10,6 +10,25 @@ const here = fileURLToPath(new URL(".", import.meta.url));
 // Every @seamscript package is released with the same version as this one.
 const { version } = JSON.parse(readFileSync(join(here, "package.json"), "utf8"));
 
+/**
+ * Where the @seamscript packages come from. From npm by default; a copy built
+ * for a GitHub release carries `release.json`, `{ "base": "<url>/" }`, and then
+ * every @seamscript package is that release's tarball, so `npm install` needs
+ * nothing from the npm registry under the @seamscript scope.
+ */
+const release = (() => {
+  try {
+    return JSON.parse(readFileSync(join(here, "release.json"), "utf8"));
+  } catch {
+    return undefined;
+  }
+})();
+
+/** The dependency spec of an @seamscript package: its version, or its tarball in the release. */
+export function seamSpec(name, from = release) {
+  return from === undefined ? version : `${from.base}${name.replace(/^@/, "").replace("/", "-")}-${version}.tgz`;
+}
+
 const USAGE = `Usage: npm create seamscript [directory] [-- --template ${TEMPLATES.join("|")}]
 
   directory         Where to create the app (default: seamscript-app)
@@ -69,18 +88,21 @@ function packageJson(name, template) {
       preview: "vite preview",
     },
     dependencies: {
-      "@seamscript/core": version,
-      ...(react ? { "@seamscript/react": version } : {}),
-      "@seamscript/runtime": version,
+      "@seamscript/core": seamSpec("@seamscript/core"),
+      ...(react ? { "@seamscript/react": seamSpec("@seamscript/react") } : {}),
+      "@seamscript/runtime": seamSpec("@seamscript/runtime"),
       ...(react ? { react: VERSIONS.react, "react-dom": VERSIONS["react-dom"] } : {}),
     },
     devDependencies: {
-      "@seamscript/compiler": version,
-      "@seamscript/ts-plugin": version,
+      "@seamscript/compiler": seamSpec("@seamscript/compiler"),
+      "@seamscript/ts-plugin": seamSpec("@seamscript/ts-plugin"),
       ...(react ? { "@types/react": VERSIONS["@types/react"], "@types/react-dom": VERSIONS["@types/react-dom"], "@vitejs/plugin-react": VERSIONS["@vitejs/plugin-react"] } : {}),
       typescript: VERSIONS.typescript,
       vite: VERSIONS.vite,
     },
+    // The compiler depends on @seamscript/parser by version, which the registry
+    // doesn't have when the packages come from a release.
+    ...(release === undefined ? {} : { overrides: { "@seamscript/parser": seamSpec("@seamscript/parser") } }),
   });
 }
 
