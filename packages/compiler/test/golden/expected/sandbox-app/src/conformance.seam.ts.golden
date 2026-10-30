@@ -1,0 +1,102 @@
+import "@seamscript/core";
+import { __b, __decode, __unknownAsync, Text, fetch } from "@seamscript/runtime";
+// Unicode's conformance data, run through Text in this browser, next to the
+// browser's own Intl.Segmenter and String.prototype.normalize. The data files are
+// served from /ucd/ (packages/core/.ucd, fetched with their SHA-256 checked).
+
+interface Report {
+  readonly unicode: string | null;
+  readonly deterministic: boolean;
+  readonly grapheme: { total: number; text: string[]; intl: string[] };
+  readonly normalization: { total: number; text: string[]; host: string[] };
+}
+
+declare global {
+  interface Window {
+    __conformance?: Report | { error: string };
+  }
+}
+
+const lines = (body: string) =>
+  body
+    .split("\n")
+    .map((line) => line.replace(/#.*/, "").trim())
+    .filter((line) => line !== "");
+
+const fromHex = (hex: string) => String.fromCodePoint(...hex.trim().split(/\s+/).map((h) => parseInt(h, 16)));
+
+async function file(name: string): Promise<string> {
+  const res = await fetch(`/ucd/${name}`);
+  if (!res.ok) throw new Error(`/ucd/${name}: HTTP ${res.status}`);
+  const text = __decode(__b.string, await __unknownAsync(res.text()));
+  if (!text.ok) throw new Error(`/ucd/${name}: ${text.error.expected} expected`);
+  return text.value;
+}
+
+function graphemes(body: string): Report["grapheme"] {
+  const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+  const text: string[] = [];
+  const intl: string[] = [];
+  const cases = lines(body);
+  for (const line of cases) {
+    let s = "";
+    let current = "";
+    const clusters: string[] = [];
+    for (const token of line.split(/\s+/).slice(1)) {
+      if (token === "÷") {
+        clusters.push(current);
+        current = "";
+      } else if (token !== "×") {
+        const c = String.fromCodePoint(parseInt(token, 16));
+        s += c;
+        current += c;
+      }
+    }
+    const expected = JSON.stringify(clusters);
+    // The test strings are not normalized, and segmentation does not depend on it.
+    if (JSON.stringify(Text.graphemes(s as Text<"NFC">)) !== expected) text.push(line);
+    if (JSON.stringify([...segmenter.segment(s)].map((x) => x.segment)) !== expected) intl.push(line);
+  }
+  return { total: cases.length, text, intl };
+}
+
+// c2 == NFC(c1) == NFC(c2) == NFC(c3), c4 == NFC(c4) == NFC(c5), and the same for NFD.
+function normalization(body: string): Report["normalization"] {
+  const text: string[] = [];
+  const host: string[] = [];
+  let total = 0;
+  for (const line of lines(body)) {
+    if (line.startsWith("@")) continue;
+    total++;
+    const [c1, c2, c3, c4, c5] = line.split(";").slice(0, 5).map(fromHex) as [string, string, string, string, string];
+    const check = (nfc: (s: string) => string, nfd: (s: string) => string) =>
+      [c1, c2, c3].every((x) => nfc(x) === c2) &&
+      [c4, c5].every((x) => nfc(x) === c4) &&
+      [c1, c2, c3].every((x) => nfd(x) === c3) &&
+      [c4, c5].every((x) => nfd(x) === c5);
+    if (!check(Text.nfc, Text.nfd)) text.push(line);
+    if (!check((s) => s.normalize("NFC"), (s) => s.normalize("NFD"))) host.push(line);
+  }
+  return { total, text, host };
+}
+
+async function run(): Promise<void> {
+  const [gb, nt] = await Promise.all([file("GraphemeBreakTest.txt"), file("NormalizationTest.txt")]);
+  const report: Report = {
+    unicode: Text.unicodeVersion,
+    deterministic: Text.deterministic,
+    grapheme: graphemes(gb),
+    normalization: normalization(nt),
+  };
+  window.__conformance = report;
+  document.getElementById("out")!.textContent =
+    `Text (Unicode ${report.unicode}): grapheme ${report.grapheme.total - report.grapheme.text.length}/${report.grapheme.total}, ` +
+    `normalization ${report.normalization.total - report.normalization.text.length}/${report.normalization.total}\n` +
+    `This browser: grapheme ${report.grapheme.total - report.grapheme.intl.length}/${report.grapheme.total}, ` +
+    `normalization ${report.normalization.total - report.normalization.host.length}/${report.normalization.total}`;
+}
+
+run().catch((e: unknown) => {
+  window.__conformance = { error: String(e) };
+  document.getElementById("out")!.textContent = String(e);
+});

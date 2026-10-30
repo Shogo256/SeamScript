@@ -1,0 +1,229 @@
+import { __b, __decode, __unknown, Pcm, type Decoder as __Decoder, type ObjectDecoder as __ObjectDecoder, type Bytes, type DecodeError } from "@seamscript/runtime";
+import captureUrl from "./capture.worklet.seam.ts?worker&url";
+
+const RATE = 16000;
+/** Frames per WebSocket message: 20 ms. */
+const CHUNK = 320;
+
+// What the device actually gives, which may differ from what was asked for.
+type MicSettings = { sampleRate?: number, channelCount?: number };
+const MicSettings: __ObjectDecoder<MicSettings> = __b.object<MicSettings>({
+  sampleRate: __b.optional(__b.range(__b.number, 8000, 384000)),
+  channelCount: __b.optional(__b.range(__b.number, 1, 32)),
+});
+// A block of samples from the worklet, at the context's rate.
+type Block = Pcm<"float32", 16000, 1>;
+const Block: __Decoder<Block> = __b.length(__b.pcm("float32", 16000, 1), 0, 4096);
+// What travels over the WebSocket, both ways: a 4-byte little-endian sequence
+// number, then 16 kHz mono Int16 samples, at most 100 ms.
+type Frame = Bytes;
+const Frame: __Decoder<Frame> = __b.length(__b.bytes, 6, 3204);
+type Chunk = Pcm<"int16", 16000, 1>;
+const Chunk: __Decoder<Chunk> = __b.length(__b.pcm("int16", 16000, 1), 1, 1600);
+const HEADER = 4;
+// Another echo server to talk to, such as Throughline's, given as `?echo=ws://host:port`.
+type EchoUrl = string;
+const EchoUrl: __Decoder<EchoUrl> = __b.matches(__b.string, /^wss?:\/\/\S+$/);
+
+// The output level is sampled this often while audio is scheduled; above this RMS a window counts as audible.
+const LEVEL_EVERY_MS = 50;
+const AUDIBLE_RMS = 1e-3;
+
+const $ = (id: string) => document.querySelector<HTMLElement>(`[data-testid="${id}"]`)!;
+const stats = {
+  /** Microphone blocks from the worklet. */
+  blocks: 0,
+  sent: 0,
+  /** Frames that came back and passed both boundaries. */
+  received: 0,
+  rejected: 0,
+  /** Received chunks whose samples hash the same as the chunk sent under that number. */
+  matched: 0,
+  /** ... and those that came back different. */
+  mismatched: 0,
+  /** Received numbers that were never sent (or already came back). */
+  unmatched: 0,
+  /** Output level windows sampled while audio was scheduled, and how many of them were audible. */
+  playingWindows: 0,
+  audibleWindows: 0,
+  maxOutputRms: 0,
+};
+const show = () => {
+  for (const key of ["sent", "received", "rejected", "matched", "mismatched"] as const) $(key).textContent = String(stats[key]);
+  $("level").textContent = `${stats.audibleWindows} of ${stats.playingWindows} windows audible, peak RMS ${stats.maxOutputRms.toFixed(4)}`;
+};
+
+let session: { stop(): void; sendRaw(data: ArrayBuffer | ArrayBufferView<ArrayBuffer> | string): void; corruptNext(): void } | undefined;
+
+// For the end-to-end test: the counters, a way to put any bytes on the wire, and
+// a way to change a chunk's bytes after they were hashed (to see the check fail).
+(window as { __voice?: unknown }).__voice = {
+  stats,
+  sendRaw: (data: ArrayBuffer | ArrayBufferView<ArrayBuffer> | string) => session?.sendRaw(data),
+  corruptNext: () => session?.corruptNext(),
+};
+
+const hex = (digest: ArrayBuffer) => Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
+const sha256 = (bytes: ArrayBufferView<ArrayBuffer>) => crypto.subtle.digest("SHA-256", bytes).then(hex);
+
+function describe(e: DecodeError): string {
+  return `${e.path.length > 0 ? `${e.path.join(".")}: ` : ""}expected ${e.expected}, got ${e.actual} (${e.rule})`;
+}
+
+/** The `echo` query parameter if there is one, else the backend's own `/voice/echo`. */
+function echoUrl(): string {
+  const given = __unknown(new URLSearchParams(location.search).get("echo"));
+  if (given === null) return new URL("echo", location.href.replace(/^http/, "ws")).href;
+  const url = __decode(EchoUrl, given);
+  if (!url.ok) throw new Error(`The echo parameter: ${describe(url.error)}`);
+  return url.value;
+}
+
+async function start(): Promise<void> {
+  $("status").textContent = "starting";
+  const echo = echoUrl();
+  // Made before the first await, while the click still counts as a user gesture:
+  // otherwise the browser may keep the context suspended. The browser resamples
+  // the microphone into its 16 kHz.
+  const ctx = new AudioContext({ sampleRate: RATE });
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true } });
+  const track = stream.getAudioTracks()[0]!;
+  const settings = __decode(MicSettings, __unknown(track.getSettings()));
+  $("mic").textContent = settings.ok ? `${settings.value.sampleRate ?? "?"} Hz, ${settings.value.channelCount ?? "?"} ch (resampled to ${RATE} Hz)` : describe(settings.error);
+
+  await ctx.audioWorklet.addModule(captureUrl);
+  const capture = new AudioWorkletNode(ctx, "capture", { numberOfInputs: 1, numberOfOutputs: 0, channelCount: 1, channelCountMode: "explicit" });
+  ctx.createMediaStreamSource(stream).connect(capture);
+  void ctx.resume();
+
+  const ws = new WebSocket(echo);
+  ws.binaryType = "arraybuffer";
+
+  // Everything played goes through the analyser, so its level is the level of what came back.
+  const output = ctx.createAnalyser();
+  output.fftSize = 2048;
+  output.connect(ctx.destination);
+  let playhead = 0;
+  const levelSamples = new Float32Array(output.fftSize);
+  const levels = setInterval(() => {
+    if (playhead <= ctx.currentTime) return; // nothing scheduled: silence is expected
+    output.getFloatTimeDomainData(levelSamples);
+    let sum = 0;
+    for (const x of levelSamples) sum += x * x;
+    const rms = Math.sqrt(sum / levelSamples.length);
+    stats.playingWindows++;
+    if (rms > AUDIBLE_RMS) stats.audibleWindows++;
+    stats.maxOutputRms = Math.max(stats.maxOutputRms, rms);
+    show();
+  }, LEVEL_EVERY_MS);
+
+  // Microphone → numbered Int16 chunks of 20 ms → server. Each chunk's sample
+  // bytes are hashed as sent, to be compared with what comes back.
+  const pending = new Int16Array(CHUNK);
+  let filled = 0;
+  let nextSeq = 0;
+  let corrupt = false;
+  const sentHashes = new Map<number, Promise<string>>();
+  const send = (samples: Int16Array<ArrayBuffer>) => {
+    const payload = new Uint8Array(Chunk.encode(Pcm.of("int16", RATE, 1, samples)));
+    const frame = new Uint8Array(HEADER + payload.byteLength);
+    const seq = nextSeq++;
+    new DataView(frame.buffer).setUint32(0, seq, true);
+    frame.set(payload, HEADER);
+    sentHashes.set(seq, sha256(payload));
+    if (corrupt) {
+      frame[HEADER] = frame[HEADER]! ^ 0xff;
+      corrupt = false;
+    }
+    ws.send(frame);
+    stats.sent++;
+  };
+  capture.port.onmessage = (e) => {
+    const block = __decode(Block, __unknown(e.data));
+    if (!block.ok) {
+      $("problem").textContent = `Microphone block: ${describe(block.error)}`;
+      return;
+    }
+    stats.blocks++;
+    for (const x of block.value.samples) {
+      pending[filled++] = Math.max(-32768, Math.min(32767, Math.round(x * 32767)));
+      if (filled === CHUNK) {
+        if (ws.readyState === WebSocket.OPEN) send(pending.slice());
+        filled = 0;
+      }
+    }
+    show();
+  };
+
+  const reject = (error: DecodeError) => {
+    stats.rejected++;
+    $("problem").textContent = `Rejected a message: ${describe(error)}`;
+    show();
+  };
+
+  // Server → checked frames → speakers, queued back to back.
+  ws.onmessage = (e) => {
+    const frame = __decode(Frame, __unknown(e.data));
+    if (!frame.ok) return reject(frame.error);
+    const seq = new DataView(frame.value.buffer, frame.value.byteOffset, HEADER).getUint32(0, true);
+    const payload = frame.value.subarray(HEADER);
+    const chunk = __decode(Chunk, payload);
+    if (!chunk.ok) return reject(chunk.error);
+    stats.received++;
+    const sent = sentHashes.get(seq);
+    sentHashes.delete(seq);
+    if (sent === undefined) stats.unmatched++;
+    else {
+      void Promise.all([sent, sha256(payload)]).then(([a, b]) => {
+        if (a === b) stats.matched++;
+        else {
+          stats.mismatched++;
+          $("problem").textContent = `Chunk ${seq} came back different from what was sent`;
+        }
+        show();
+      });
+    }
+    const { samples, frames } = chunk.value;
+    const buffer = ctx.createBuffer(1, frames, RATE);
+    const out = buffer.getChannelData(0);
+    for (let i = 0; i < frames; i++) out[i] = samples[i]! / 32768;
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.connect(output);
+    playhead = Math.max(playhead, ctx.currentTime + 0.1);
+    source.start(playhead);
+    playhead += buffer.duration;
+    show();
+  };
+  ws.onopen = () => ($("status").textContent = "live");
+  ws.onclose = () => ($("status").textContent = "closed");
+
+  session = {
+    stop() {
+      clearInterval(levels);
+      ws.close();
+      for (const t of stream.getTracks()) t.stop();
+      void ctx.close();
+      $("status").textContent = "stopped";
+    },
+    sendRaw: (data) => ws.send(data),
+    corruptNext: () => {
+      corrupt = true;
+    },
+  };
+}
+
+$("start").onclick = () => {
+  $("start").toggleAttribute("disabled", true);
+  $("stop").toggleAttribute("disabled", false);
+  start().catch((e: unknown) => {
+    $("status").textContent = "failed";
+    $("problem").textContent = String(e);
+  });
+};
+$("stop").onclick = () => {
+  session?.stop();
+  session = undefined;
+  $("start").toggleAttribute("disabled", false);
+  $("stop").toggleAttribute("disabled", true);
+};

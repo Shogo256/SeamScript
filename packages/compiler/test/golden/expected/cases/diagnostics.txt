@@ -1,0 +1,51 @@
+packages/compiler/test/golden/cases/errors-declarations.seam.ts(7,6): error SEAM1101: `() => void` cannot cross a boundary. Allowed: string, number, boolean, null, Int64, Decimal, Zoned, Text<NFC|NFD>, string or number literals, boundary names, T[], T | null.
+packages/compiler/test/golden/cases/errors-declarations.seam.ts(8,6): error SEAM1101: any would let unchecked data through the boundary; give the field its actual type, or a boundary of its own for nested data.
+packages/compiler/test/golden/cases/errors-declarations.seam.ts(9,6): error SEAM1101: undefined cannot arrive from outside; mark the field optional with `name?:` instead.
+packages/compiler/test/golden/cases/errors-declarations.seam.ts(10,6): error SEAM1101: Nested object types need a boundary of their own; declare one and refer to it by name.
+packages/compiler/test/golden/cases/errors-declarations.seam.ts(11,6): error SEAM1101: Generic types cannot cross a boundary. Write T[] instead.
+packages/compiler/test/golden/cases/errors-declarations.seam.ts(12,6): error SEAM1301: Text needs its normalization form: Text<NFC> or Text<NFD>.
+packages/compiler/test/golden/cases/errors-declarations.seam.ts(12,6): error TS2314: Generic type 'Text' requires 1 type argument(s).
+packages/compiler/test/golden/cases/errors-declarations.seam.ts(13,6): error SEAM1301: Text needs its normalization form: Text<NFC> or Text<NFD>.
+packages/compiler/test/golden/cases/errors-declarations.seam.ts(13,6): error SEAM1301: Text takes its normalization form: Text<NFC> or Text<NFD>.
+packages/compiler/test/golden/cases/errors-declarations.seam.ts(13,11): error TS2304: Cannot find name 'NFKC'.
+packages/compiler/test/golden/cases/errors-declarations.seam.ts(14,6): error SEAM1106: Plain is a type, not a boundary: only boundaries carry a decoder. Declare it with `boundary Plain { ... }` instead of `type` or `interface`.
+packages/compiler/test/golden/cases/errors-declarations.seam.ts(15,3): error SEAM1103: A boundary may only contain fields (`name: Type` or `name?: Type`).
+packages/compiler/test/golden/cases/errors-declarations.seam.ts(16,13): error SEAM1107: `maxLength` applies to Text (grapheme clusters), arrays (elements), Bytes (bytes) and Pcm / Planar (frames); for a length in characters, declare the field Text<NFC>. `string` takes no `maxLength`.
+packages/compiler/test/golden/cases/errors-declarations.seam.ts(17,13): error SEAM1107: The range is empty: 10 is above 1. Write the smaller bound first.
+packages/compiler/test/golden/cases/errors-declarations.seam.ts(18,22): error SEAM1107: The g and y flags make a pattern's test() depend on the previous value; remove them.
+packages/compiler/test/golden/cases/errors-declarations.seam.ts(19,10): error SEAM1302: Pcm takes a sample format, a sample rate and a channel count: Pcm<Int16, 16000, 1> or Pcm<Float32, 48000, 2>. The rate and the channel count are positive whole numbers.
+packages/compiler/test/golden/cases/errors-declarations.seam.ts(19,14): error TS2552: Cannot find name 'Int24'. Did you mean 'Int64'?
+packages/compiler/test/golden/cases/errors-declarations.seam.ts(20,11): error SEAM1302: Planar takes Float32 and a channel count: Planar<Float32, 1>. Planar audio (an AudioWorklet's inputs) is always Float32; use Pcm<Int16, ...> for Int16 bytes.
+packages/compiler/test/golden/cases/errors-declarations.seam.ts(20,18): error TS2344: Type '"int16"' does not satisfy the constraint '"float32"'.
+packages/compiler/test/golden/cases/errors-declarations.seam.ts(25,27): error SEAM1105: Union members need a field with a literal type whose values no two members share, e.g. `kind: "paid"`.
+packages/compiler/test/golden/cases/errors-declarations.seam.ts(26,22): error SEAM1104: A union boundary may only list other boundaries: `boundary Event = Paid | Refunded`.
+packages/compiler/test/golden/cases/errors-declarations.seam.ts(27,23): error SEAM1106: Shape is a type, not a boundary: only boundaries carry a decoder. Declare it with `boundary Shape { ... }` instead of `type` or `interface`.
+packages/compiler/test/golden/cases/errors-declarations.seam.ts(30,3): error SEAM1102: A boundary must be declared at the top level of a module; move it out of the function or block (export it if other modules need it).
+packages/compiler/test/golden/cases/errors-declarations.seam.ts(30,3): error TS1434: Unexpected keyword or identifier.
+packages/compiler/test/golden/cases/errors-declarations.seam.ts(30,3): error TS2304: Cannot find name 'boundary'.
+packages/compiler/test/golden/cases/errors-declarations.seam.ts(30,12): error TS1434: Unexpected keyword or identifier.
+packages/compiler/test/golden/cases/errors-declarations.seam.ts(30,12): error TS2304: Cannot find name 'Inside'.
+packages/compiler/test/golden/cases/errors-declarations.seam.ts(30,24): error TS2693: 'string' only refers to a type, but is being used as a value here.
+packages/compiler/test/golden/cases/errors-declarations.seam.ts(34,1): error TS1128: Declaration or statement expected.
+packages/compiler/test/golden/cases/errors-declarations.seam.ts(34,8): error SEAM1401: A latest function cannot be a generator; remove the `*` and return the final value (a latest function settles once per call).
+packages/compiler/test/golden/cases/errors-declarations.seam.ts(34,8): error TS1434: Unexpected keyword or identifier.
+packages/compiler/test/golden/cases/errors-declarations.seam.ts(34,8): error TS2304: Cannot find name 'latest'.
+packages/compiler/test/golden/cases/errors-declarations.seam.ts(39,51): error SEAM1402: This parameter is an AbortSignal, but its type is not written `AbortSignal`, so it is not recognized: write `AbortSignal` here and the latest function supplies the signal (callers leave it out).
+packages/compiler/test/golden/cases/errors-flow.seam.ts(8,19): error SEAM2001: Unknown data cannot be asserted with `as`; decode it instead (`decode T from ...`).
+packages/compiler/test/golden/cases/errors-flow.seam.ts(8,19): error TS2352: Conversion of type 'Unknown' to type 'Order' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Type 'Unknown' is missing the following properties from type 'Order': id, memo, total, placedAt, and 10 more.
+packages/compiler/test/golden/cases/errors-flow.seam.ts(9,22): error SEAM2001: Unknown data cannot flow into unknown here; decode it first (`decode T from ...`).
+packages/compiler/test/golden/cases/errors-flow.seam.ts(10,19): error SEAM2001: Unknown data cannot be interpolated into a template; decode it first (`decode T from ...`).
+packages/compiler/test/golden/cases/errors-flow.seam.ts(11,15): error SEAM2001: Unknown data cannot be concatenated or added; decode it first (`decode T from ...`).
+packages/compiler/test/golden/cases/errors-flow.seam.ts(11,15): error TS2365: Operator '+' cannot be applied to types 'Unknown' and 'number'.
+packages/compiler/test/golden/cases/errors-flow.seam.ts(12,15): error SEAM2001: Unknown data cannot be tested with `in`; decode it first (`decode T from ...`).
+packages/compiler/test/golden/cases/errors-flow.seam.ts(13,15): error SEAM2002: This call takes Unknown data and returns any, which would let it out unchecked; decode it first.
+packages/compiler/test/golden/cases/errors-flow.seam.ts(14,9): error TS2740: Type 'Unknown' is missing the following properties from type 'Order': id, memo, total, placedAt, and 10 more.
+packages/compiler/test/golden/cases/errors-flow.seam.ts(15,17): error SEAM2003: JSON.parse returns outside data, so it must be called directly where it is used (`JSON.parse(...)`); a reference to it (.bind, .call, an alias) cannot be tracked.
+packages/compiler/test/golden/cases/errors-flow.seam.ts(16,11): error SEAM2004: Destructuring MessageEvent.data would skip marking it Unknown; read it as a property (`event.data`) and decode it.
+packages/compiler/test/golden/cases/errors-flow.seam.ts(17,44): error TS2339: Property 'length' does not exist on type 'never'.
+packages/compiler/test/golden/cases/errors-flow.seam.ts(19,13): error SEAM2101: .length works on UTF-16 code units; use Text.length(t) for graphemes.
+packages/compiler/test/golden/cases/errors-flow.seam.ts(20,17): error SEAM2101: Indexing Text reads UTF-16 code units; use Text.at(t, i) for graphemes.
+packages/compiler/test/golden/cases/errors-flow.seam.ts(21,31): error SEAM2201: JSON.stringify cannot serialize bigint (Int64 is a bigint); pass the boundary's encoded form, e.g. `Order.encode(order)`.
+packages/compiler/test/golden/cases/errors-flow.seam.ts(22,20): error SEAM2001: Unknown data cannot be thrown; decode it first (`decode T from ...`).
+packages/compiler/test/golden/cases/errors-syntax.seam.ts(5,1): error SEAM1000: Unexpected token

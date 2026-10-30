@@ -1,0 +1,12 @@
+import { Int64, fetch } from "@seamscript/runtime";
+import type { Order } from "./api.seam";
+import type { Screen } from "./screen";
+
+// Bug 1, written exactly as in the TypeScript version. SeamScript rejects it:
+// res.json() is Unknown, and Unknown may not flow into `unknown`.
+export async function loadOrder(screen: Screen, id: Int64): Promise<void> {
+  const res = await fetch(`/api/orders/${id}`);
+  const v = await res.json();
+  const u: unknown = v;
+  screen.order = u as Order;
+}

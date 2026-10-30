@@ -1,0 +1,198 @@
+import "@seamscript/core";
+import { __b, Decimal, Int64, Text, Zoned, type Decoder as __Decoder, type ObjectDecoder as __ObjectDecoder } from "@seamscript/runtime";
+// Everything the backend sends or receives. Each boundary is both the type and
+// its decoder; nothing from the network reaches the app without passing one.
+
+export type Instrument = {
+  id: Int64,
+  symbol: string,
+  name: Text<"NFC">,
+  tickSize: Decimal,
+  last: Decimal,
+  prevClose: Decimal,
+  version: Int64,
+  updatedAt: Zoned,
+};
+export const Instrument: __ObjectDecoder<Instrument> = __b.object<Instrument>({
+  id: __b.int64,
+  symbol: __b.string,
+  name: __b.text("NFC"),
+  tickSize: __b.decimal,
+  last: __b.decimal,
+  prevClose: __b.decimal,
+  version: __b.int64,
+  updatedAt: __b.zoned,
+});
+
+export type Order = {
+  id: Int64,
+  clientOrderId: string,
+  instrumentId: Int64,
+  side: "buy" | "sell",
+  quantity: Int64,
+  filled: Int64,
+  price: Decimal,
+  status: "open" | "partially_filled" | "filled" | "cancelled",
+  memo: Text<"NFC">,
+  version: Int64,
+  createdAt: Zoned,
+  updatedAt: Zoned,
+};
+export const Order: __ObjectDecoder<Order> = __b.object<Order>({
+  id: __b.int64,
+  clientOrderId: __b.string,
+  instrumentId: __b.int64,
+  side: __b.literal("buy", "sell"),
+  quantity: __b.int64,
+  filled: __b.int64,
+  price: __b.decimal,
+  status: __b.literal("open", "partially_filled", "filled", "cancelled"),
+  memo: __b.text("NFC"),
+  version: __b.int64,
+  createdAt: __b.zoned,
+  updatedAt: __b.zoned,
+});
+
+export type Fill = {
+  quantity: Int64,
+  price: Decimal,
+  at: Zoned,
+};
+export const Fill: __ObjectDecoder<Fill> = __b.object<Fill>({
+  quantity: __b.int64,
+  price: __b.decimal,
+  at: __b.zoned,
+});
+
+export type OrderDetail = {
+  order: Order,
+  fills: Fill[],
+};
+export const OrderDetail: __ObjectDecoder<OrderDetail> = __b.object<OrderDetail>({
+  order: Order,
+  fills: __b.array(Fill),
+});
+
+export type Snapshot = {
+  epoch: string,
+  seq: Int64,
+  serverTime: Zoned,
+  instruments: Instrument[],
+  orders: Order[],
+};
+export const Snapshot: __ObjectDecoder<Snapshot> = __b.object<Snapshot>({
+  epoch: __b.string,
+  seq: __b.int64,
+  serverTime: __b.zoned,
+  instruments: __b.array(Instrument),
+  orders: __b.array(Order),
+});
+
+export type SearchResult = {
+  query: Text<"NFC">,
+  items: Instrument[],
+};
+export const SearchResult: __ObjectDecoder<SearchResult> = __b.object<SearchResult>({
+  query: __b.text("NFC"),
+  items: __b.array(Instrument),
+});
+
+// ---- WebSocket ---------------------------------------------------------------
+
+export type Hello = {
+  type: "hello",
+  epoch: string,
+  seq: Int64,
+  serverTime: Zoned,
+};
+export const Hello: __ObjectDecoder<Hello> = __b.object<Hello>({
+  type: __b.literal("hello"),
+  epoch: __b.string,
+  seq: __b.int64,
+  serverTime: __b.zoned,
+});
+
+export type Heartbeat = {
+  type: "heartbeat",
+  epoch: string,
+  seq: Int64,
+  serverTime: Zoned,
+};
+export const Heartbeat: __ObjectDecoder<Heartbeat> = __b.object<Heartbeat>({
+  type: __b.literal("heartbeat"),
+  epoch: __b.string,
+  seq: __b.int64,
+  serverTime: __b.zoned,
+});
+
+export type Tick = {
+  type: "tick",
+  seq: Int64,
+  instrumentId: Int64,
+  last: Decimal,
+  at: Zoned,
+};
+export const Tick: __ObjectDecoder<Tick> = __b.object<Tick>({
+  type: __b.literal("tick"),
+  seq: __b.int64,
+  instrumentId: __b.int64,
+  last: __b.decimal,
+  at: __b.zoned,
+});
+
+export type OrderEvent = {
+  type: "order",
+  seq: Int64,
+  order: Order,
+};
+export const OrderEvent: __ObjectDecoder<OrderEvent> = __b.object<OrderEvent>({
+  type: __b.literal("order"),
+  seq: __b.int64,
+  order: Order,
+});
+
+export type ServerMessage = Hello | Heartbeat | Tick | OrderEvent;
+export const ServerMessage: __Decoder<ServerMessage> = __b.union<ServerMessage>(() => [Hello, Heartbeat, Tick, OrderEvent]);
+
+/** What a message that failed to decode may still tell: which sequence number was lost. */
+export type Envelope = {
+  seq: Int64,
+};
+export const Envelope: __ObjectDecoder<Envelope> = __b.object<Envelope>({
+  seq: __b.int64,
+});
+
+// ---- Placing orders ------------------------------------------------------------
+
+export type NewOrder = {
+  clientOrderId: string,
+  instrumentId: Int64,
+  side: "buy" | "sell",
+  quantity: Int64,
+  price: Decimal,
+  memo: Text<"NFC">,
+};
+export const NewOrder: __ObjectDecoder<NewOrder> = __b.object<NewOrder>({
+  clientOrderId: __b.string,
+  instrumentId: __b.int64,
+  side: __b.literal("buy", "sell"),
+  quantity: __b.int64,
+  price: __b.decimal,
+  memo: __b.text("NFC"),
+});
+
+export type OrderAccepted = {
+  order: Order,
+};
+export const OrderAccepted: __ObjectDecoder<OrderAccepted> = __b.object<OrderAccepted>({
+  order: Order,
+});
+
+export type ApiError = {
+  error: string,
+  field?: string,
+};
+export const ApiError: __ObjectDecoder<ApiError> = __b.object<ApiError>({
+  error: __b.string,
+  field: __b.optional(__b.string),
+});

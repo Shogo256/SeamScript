@@ -1,0 +1,1 @@
+demo/seamscript/src/load-order.seam.ts(9,22): error SEAM2001: Unknown data cannot flow into unknown here; decode it first (`decode T from ...`).

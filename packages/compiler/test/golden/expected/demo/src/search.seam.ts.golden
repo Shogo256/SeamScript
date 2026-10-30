@@ -1,0 +1,19 @@
+import { __decode, __latestFor, fetch, type LatestArgs as __LatestArgs, type LatestReturn as __LatestReturn } from "@seamscript/runtime";
+import { SearchResult } from "./api.seam";
+import type { Screen } from "./screen";
+
+// The same feature. `latest` turns every answer but the newest one into Stale.
+function search(...args: __LatestArgs<typeof search__impl, false>): __LatestReturn<typeof search__impl> {
+  return __latestFor(search__impl).apply(undefined, args);
+}
+search.fork = () => __latestFor(search__impl).fork();
+async function search__impl(query: string) {
+  const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+  return __decode(SearchResult, await res.json());
+}
+
+export async function onSearchInput(screen: Screen, query: string): Promise<void> {
+  screen.query = query;
+  const r = await search(query);
+  if (r.ok) screen.resultsFor = r.value.query;
+}

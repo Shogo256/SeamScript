@@ -1,0 +1,61 @@
+import { Int64, Zoned } from "@seamscript/runtime";
+import { memo } from "react";
+import { change, clock, fractionDigits, int, price, signed } from "../format.seam";
+import { useFeedMeta, useInstrument, useInstrumentIds } from "./hooks.seam";
+
+export function PriceBoard({ selected, onSelect }: { selected: Int64 | null; onSelect(id: Int64): void }) {
+  const ids = useInstrumentIds();
+  const meta = useFeedMeta();
+  const stale = meta.status !== "live";
+  return (
+    <section className={`panel board${stale ? " stale" : ""}`} data-testid="board" data-stale={String(stale)}>
+      <h2>Prices</h2>
+      {stale && meta.epoch !== null ? (
+        <p className="banner" data-testid="stale-banner">
+          Live updates have stopped. Values are as of seq {int(meta.seq)}.
+        </p>
+      ) : null}
+      <table>
+        <thead>
+          <tr>
+            <th>Code</th>
+            <th>Instrument</th>
+            <th className="num">Last</th>
+            <th className="num">Change</th>
+            <th className="num">Time</th>
+          </tr>
+        </thead>
+        <tbody>
+          {ids.map((id) => (
+            <InstrumentRow key={`${id}`} id={id} selected={id === selected} onSelect={onSelect} />
+          ))}
+        </tbody>
+      </table>
+    </section>
+  );
+}
+
+const InstrumentRow = memo(function InstrumentRow({ id, selected, onSelect }: { id: Int64; selected: boolean; onSelect(id: Int64): void }) {
+  const i = useInstrument(id);
+  if (i === undefined) return null;
+  const c = change(i.last, i.prevClose);
+  return (
+    <tr
+      data-testid="instrument-row"
+      data-id={`${i.id}`}
+      data-last={i.last}
+      data-version={`${i.version}`}
+      data-updated={`${Zoned.toDate(i.updatedAt).getTime()}`}
+      className={selected ? "selected" : undefined}
+      onClick={() => onSelect(i.id)}
+    >
+      <td className="mono">{i.symbol}</td>
+      <td className="name">{i.name}</td>
+      <td className="num">{price(i.last, i.tickSize)}</td>
+      <td className={`num ${c.sign > 0 ? "up" : c.sign < 0 ? "down" : ""}`}>
+        {signed(c.diff, fractionDigits(i.tickSize))} ({c.percent}%)
+      </td>
+      <td className="num time">{clock(i.updatedAt)}</td>
+    </tr>
+  );
+});

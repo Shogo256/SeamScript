@@ -1,0 +1,21 @@
+import { __b, __decode, __unknownEach, type Decoder as __Decoder, type Planar } from "@seamscript/runtime";
+// Runs on the audio thread: hands each block of microphone input to the page.
+
+// One input of `process`: mono, since the node mixes its input down to one channel.
+type Block = Planar<"float32", 1>;
+const Block: __Decoder<Block> = __b.planar("float32", 1);
+
+class Capture extends AudioWorkletProcessor {
+  process(inputs: Float32Array[][]): boolean {
+    // Before the microphone is connected the input has no channels, and this fails.
+    const block = __decode(Block, __unknownEach(inputs)[0]);
+    if (block.ok) {
+      // The audio thread reuses its arrays once process returns: send a copy.
+      const copy = block.value.channels[0].slice();
+      this.port.postMessage(copy, [copy.buffer]);
+    }
+    return true;
+  }
+}
+
+registerProcessor("capture", Capture);

@@ -1,0 +1,35 @@
+import { Zoned } from "@seamscript/runtime";
+import { clock } from "../format.seam";
+import { useProblems } from "./hooks.seam";
+
+const KIND: Record<string, string> = {
+  frame: "frame",
+  json: "JSON",
+  decode: "shape",
+  http: "HTTP",
+  epoch: "restart",
+  "unknown-entity": "mismatch",
+  core: "WASM",
+};
+
+export function Problems() {
+  const problems = useProblems();
+  return (
+    <section className="panel problems" data-testid="problems" data-count={problems.length}>
+      <h2>Rejected data</h2>
+      {problems.length === 0 ? (
+        <p className="hint">None</p>
+      ) : (
+        <ol>
+          {problems.map((p) => (
+            <li key={p.id} data-testid="problem" data-kind={p.kind} data-source={p.source} data-seq={p.seq === undefined ? "" : `${p.seq}`}>
+              <span className={`kind ${p.kind}`}>{KIND[p.kind] ?? p.kind}</span>
+              <span className="time">{clock(Zoned.fromDate(new Date(p.at), 0))}</span>
+              <span className="message">{p.message}</span>
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
+  );
+}
