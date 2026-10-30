@@ -102,6 +102,10 @@ export boundary PaymentEvent = Paid | Refunded`);
 
   it("must be top level", () => {
     expect(codes("function f() { boundary X { a: string } }")).toEqual(["SEAM1102"]);
+    // Still the plain TypeScript it stands for, so TypeScript reports nothing more and the name resolves.
+    expect(run("function f() {\n  boundary X { a: Text<NFC> maxLength 3 }\n  return X;\n}").code).toContain(
+      'type X = { a: Text<"NFC"> }; const X: __ObjectDecoder<X> = null!;\n  return X;',
+    );
   });
 
   it("checks the discriminant of a union of local boundaries", () => {

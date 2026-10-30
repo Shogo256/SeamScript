@@ -125,6 +125,8 @@ export function transform(source: string, fileName: string, options: TransformOp
 
   const boundaries: { node: SeamBoundaryDeclaration; index: number; exported: boolean }[] = [];
   const decodes: SeamDecodeExpression[] = [];
+  // Constructs reported where they are and not expanded (see `asPlainTypeScript`).
+  const rejected: (SeamBoundaryDeclaration | SeamLatestDeclaration)[] = [];
   const latests: SeamLatestDeclaration[] = [];
   const textForms: t.TSTypeReference[] = [];
   const sampleForms: t.TSTypeReference[] = [];
@@ -140,7 +142,8 @@ export function transform(source: string, fileName: string, options: TransformOp
         const top = parent?.type === "Program" || (parent?.type === "ExportNamedDeclaration" && grandparent?.type === "Program");
         if (!top) {
           scope.report(node, Codes.boundaryPlacement, "A boundary must be declared at the top level of a module; move it out of the function or block (export it if other modules need it).");
-          return false;
+          rejected.push(node);
+          break;
         }
         const stmt = parent!.type === "Program" ? node : parent!;
         boundaries.push({ node, index: program.body.indexOf(stmt as t.Statement), exported: parent!.type === "ExportNamedDeclaration" });
@@ -203,29 +206,32 @@ export function transform(source: string, fileName: string, options: TransformOp
 
   // boundary Order { ... }  →  type Order = { ... };  const Order: ObjectDecoder<Order> = __b.object<Order>({ ... });
   // boundary Event = A | B  →  type Event = A | B;    const Event: Decoder<Event> = __b.union<Event>(() => [A, B]);
-  for (const { node, index, exported } of boundaries) {
-    const name = node.id.name;
-    const exp = exported ? "export " : "";
+  // `boundary Name { ... }` → `type Name = { ... }`, constraints removed (they
+  // check values, not types). Returns the type of the decoder constant.
+  const boundaryType = (node: SeamBoundaryDeclaration): string => {
     s.overwrite(start(node), start(node) + "boundary".length, "type");
-    // Constraints check values, not types: the type keeps only what precedes them.
     for (const member of node.body?.members ?? []) {
       const annotation = (member as { typeAnnotation?: FieldAnnotation | null }).typeAnnotation;
       const constraints = annotation?.constraints;
       if (constraints?.length) s.remove(end(annotation!.typeAnnotation), end(constraints[constraints.length - 1]!));
     }
-    let decoder: string | undefined;
-    let declaredType: string;
     if (node.body) {
       s.appendLeft(end(node.id), " =");
-      decoder = objectDecoder(node as SeamBoundaryDeclaration & { body: t.TSTypeLiteral }, scope, index);
-      declaredType = `__ObjectDecoder<${name}>`;
       helperTypes.add("ObjectDecoder");
-    } else {
-      decoder = unionBoundaryDecoder(node as SeamBoundaryDeclaration & { union: t.TSType }, scope, index);
-      if (node.constraints?.length) s.remove(end(node.union!), end(node.constraints[node.constraints.length - 1]!));
-      declaredType = `__Decoder<${name}>`;
-      helperTypes.add("Decoder");
+      return `__ObjectDecoder<${node.id.name}>`;
     }
+    if (node.constraints?.length) s.remove(end(node.union!), end(node.constraints[node.constraints.length - 1]!));
+    helperTypes.add("Decoder");
+    return `__Decoder<${node.id.name}>`;
+  };
+
+  for (const { node, index, exported } of boundaries) {
+    const name = node.id.name;
+    const exp = exported ? "export " : "";
+    const declaredType = boundaryType(node);
+    const decoder = node.body
+      ? objectDecoder(node as SeamBoundaryDeclaration & { body: t.TSTypeLiteral }, scope, index)
+      : unionBoundaryDecoder(node as SeamBoundaryDeclaration & { union: t.TSType }, scope, index);
     const semicolon = source[end(node) - 1] === ";" ? "" : ";";
     // On error, declare the constant anyway so the rest of the file type-checks quietly.
     const constant = decoder === undefined ? `${exp}declare const ${name}: ${declaredType};` : `${exp}const ${name}: ${declaredType} = ${decoder};`;
@@ -313,6 +319,20 @@ export function transform(source: string, fileName: string, options: TransformOp
     helperTypes.add("LatestArgs");
     if (promised) helperTypes.add("Stale");
     else helperTypes.add("LatestReturn");
+  }
+
+  // A construct reported where it is (a boundary inside a function, a generator
+  // latest function) still becomes the plain TypeScript it stands for, without its
+  // runtime part: TypeScript has nothing more to report about it, and the names it
+  // declares still resolve.
+  for (const node of rejected) {
+    if (node.type === "SeamBoundaryDeclaration") {
+      const declaredType = boundaryType(node);
+      const semicolon = source[end(node) - 1] === ";" ? "" : ";";
+      s.appendLeft(end(node), `${semicolon} const ${node.id.name}: ${declaredType} = null!;`);
+    } else {
+      s.remove(start(node), start(node.declaration)); // `latest `
+    }
   }
 
   const specifiers = [

@@ -20,11 +20,6 @@ packages/compiler/test/golden/cases/errors-declarations.seam.ts(25,27): error SE
 packages/compiler/test/golden/cases/errors-declarations.seam.ts(26,22): error SEAM1104: A union boundary may only list other boundaries: `boundary Event = Paid | Refunded`.
 packages/compiler/test/golden/cases/errors-declarations.seam.ts(27,23): error SEAM1106: Shape is a type, not a boundary: only boundaries carry a decoder. Declare it with `boundary Shape { ... }` instead of `type` or `interface`.
 packages/compiler/test/golden/cases/errors-declarations.seam.ts(30,3): error SEAM1102: A boundary must be declared at the top level of a module; move it out of the function or block (export it if other modules need it).
-packages/compiler/test/golden/cases/errors-declarations.seam.ts(30,3): error TS1434: Unexpected keyword or identifier.
-packages/compiler/test/golden/cases/errors-declarations.seam.ts(30,3): error TS2304: Cannot find name 'boundary'.
-packages/compiler/test/golden/cases/errors-declarations.seam.ts(30,12): error TS1434: Unexpected keyword or identifier.
-packages/compiler/test/golden/cases/errors-declarations.seam.ts(30,12): error TS2304: Cannot find name 'Inside'.
-packages/compiler/test/golden/cases/errors-declarations.seam.ts(30,24): error TS2693: 'string' only refers to a type, but is being used as a value here.
 packages/compiler/test/golden/cases/errors-declarations.seam.ts(34,1): error TS1128: Declaration or statement expected.
 packages/compiler/test/golden/cases/errors-declarations.seam.ts(34,8): error SEAM1401: A latest function cannot be a generator; remove the `*` and return the final value (a latest function settles once per call).
 packages/compiler/test/golden/cases/errors-declarations.seam.ts(34,8): error TS1434: Unexpected keyword or identifier.
