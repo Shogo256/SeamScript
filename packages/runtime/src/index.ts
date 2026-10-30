@@ -1,6 +1,6 @@
 export { type Ok, type Err, type Result, type DecodeError, type DecodeRule, type Stale, ok, err } from "./result.js";
 export { Pcm, type Bytes, type Planar, type SampleFormat, type Samples, type ChannelArrays } from "./audio.js";
-export { Unknown, __unknown, __unknownAsync, __unknownEach } from "./unknown.js";
+export { Unknown, UnknownAccess, __unknown, __unknownAsync, __unknownEach, __box, __unbox } from "./unknown.js";
 export { Int64 } from "./int64.js";
 export { Decimal, type Rounding } from "./decimal.js";
 export { Zoned } from "./zoned.js";

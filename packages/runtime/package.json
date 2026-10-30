@@ -18,6 +18,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./node": {
+      "types": "./dist/node.d.ts",
+      "default": "./dist/node.js"
     }
   },
   "files": [
@@ -42,6 +46,7 @@
     "access": "public"
   },
   "devDependencies": {
+    "@types/node": "24.19.2",
     "fast-check": "4.10.2",
     "typescript": "5.9.3",
     "vite": "8.3.4",
