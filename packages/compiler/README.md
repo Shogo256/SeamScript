@@ -74,6 +74,7 @@ A declared method that returns a promise gives `Promise<Unknown>`. `seamc`, the 
 | SEAM2005 | A package's `any` is used without a decode (with `"externalAny": "unknown"`, the default) |
 | SEAM2101 | Access to a Text in UTF-16 units (`.length`, indexing, `.slice`, and so on) |
 | SEAM2201 | A value containing a bigint is passed to `JSON.stringify` (pass `Order.encode(o)` instead) |
+| SEAM9001 | Editor plugin only, a warning: the editor's TypeScript is not the version `seamc` checks with (5.9), so the type errors it shows can differ from `seamc check` |
 
 Every message says how to fix the problem. In the editor, the mechanical fixes are quick fixes: SEAM2001, SEAM2005 and TypeScript's assignment errors on a typed variable (`const o: Order = JSON.parse(s)` becomes `const o = decode Order from JSON.parse(s)`), SEAM2101 (`Text.length(t)`, `Text.at(t, i)`), SEAM2201 (`Order.encode(o)`, `orders.map(Order.encode)`) and SEAM1402 (write `AbortSignal`).
 

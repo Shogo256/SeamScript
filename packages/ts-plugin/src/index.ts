@@ -20,6 +20,7 @@ import type {} from "@volar/typescript";
 import { createLanguageServicePlugin } from "@volar/typescript/lib/quickstart/createLanguageServicePlugin.js";
 import type * as ts from "typescript";
 import { createSeamCode, diff, type SeamCode, shiftWraps, toSource, toSourceExact } from "./code.js";
+import { typescriptMismatch } from "./version.js";
 
 const plugin = createLanguageServicePlugin((tsModule, info) => {
   // The project's "seamscript" settings in tsconfig.json, read when tsserver loads
@@ -28,6 +29,8 @@ const plugin = createLanguageServicePlugin((tsModule, info) => {
   const configPath = project.getConfigFilePath?.();
   const raw = configPath === undefined ? undefined : (tsModule.readConfigFile(configPath, tsModule.sys.readFile).config as { seamscript?: unknown } | undefined);
   const checker = createChecker(tsModule, readSeamConfig(raw?.seamscript).config);
+  const mismatch = typescriptMismatch(tsModule.version);
+  if (mismatch !== undefined) info.project.projectService.logger.info(`[seamscript] ${mismatch}`);
   // Volar replaces info.languageService with a proxy that maps positions; this
   // one works on the virtual code, which is what the checker pass needs.
   const service = info.languageService;
@@ -155,6 +158,10 @@ const plugin = createLanguageServicePlugin((tsModule, info) => {
         fixes.set(fileName, []);
         return [
           ...base,
+          // Once per file, at its start, where it is seen without hiding anything.
+          ...(mismatch === undefined
+            ? []
+            : [{ file, start: 0, length: 0, messageText: mismatch, category: tsModule.DiagnosticCategory.Warning, code: 9001 /* SEAM9001 */, source: "seamscript" }]),
           ...fromTransform(code, file, false),
           ...[...findings, ...checker.checkFlows(program, file, runtimeOf(fileName))].flatMap((f) => {
             const shifted = { ...f, pos: f.pos - lead, end: f.end - lead, ...(f.fix ? { fix: { ...f.fix, edits: f.fix.edits.map((e) => ({ ...e, pos: e.pos - lead, end: e.end - lead })) } } : {}) };
