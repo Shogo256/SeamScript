@@ -38,6 +38,9 @@ A project declares more in `tsconfig.json`:
 ```jsonc
 {
   "seamscript": {
+    // The rules this project is checked by. A newer seamc keeps applying them;
+    // without it, the oldest edition applies. "2026" is the first.
+    "edition": "2026",
     // "Owner.member": a method or property of an interface, class, namespace or
     // object type (declared in the project or a package); "name": a function or variable.
     "sources": ["NativeBridge.receive", "AppStore.load", "readConfig"],

@@ -1,7 +1,6 @@
 {
   "name": "@seamscript/parser",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
   "description": "Fork of @babel/parser 8.0.7 that adds SeamScript syntax: boundary, decode … from, latest",
   "keywords": [
     "seamscript",
@@ -30,6 +29,16 @@
     "@babel/types": "8.0.6"
   },
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Shogo256/SeamScript.git",
+    "directory": "packages/parser"
+  },
+  "homepage": "https://github.com/Shogo256/SeamScript/tree/main/packages/parser#readme",
+  "bugs": "https://github.com/Shogo256/SeamScript/issues",
+  "publishConfig": {
+    "access": "public"
+  },
   "devDependencies": {
     "@babel/helper-string-parser": "8.0.6",
     "@babel/helper-validator-identifier": "8.0.6",

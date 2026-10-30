@@ -1,6 +1,6 @@
 {
   "name": "create-seamscript",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Start a SeamScript app: `npm create seamscript my-app` sets up Vite, seamc check, the WASM core and editor support",
   "keywords": [
     "seamscript",
@@ -21,6 +21,13 @@
     "test": "vitest run"
   },
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Shogo256/SeamScript.git",
+    "directory": "packages/create-seamscript"
+  },
+  "homepage": "https://github.com/Shogo256/SeamScript/tree/main/packages/create-seamscript#readme",
+  "bugs": "https://github.com/Shogo256/SeamScript/issues",
   "devDependencies": {
     "vitest": "5.0.3"
   },

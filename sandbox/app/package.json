@@ -10,14 +10,14 @@
     "check": "seamc check -p tsconfig.json"
   },
   "dependencies": {
-    "@seamscript/core": "0.0.0",
-    "@seamscript/react": "0.0.0",
-    "@seamscript/runtime": "0.0.0",
+    "@seamscript/core": "0.1.0",
+    "@seamscript/react": "0.1.0",
+    "@seamscript/runtime": "0.1.0",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },
   "devDependencies": {
-    "@seamscript/compiler": "0.0.0",
+    "@seamscript/compiler": "0.1.0",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.1.2",

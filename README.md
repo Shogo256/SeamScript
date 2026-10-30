@@ -105,6 +105,7 @@ The common web APIs are sources already. Declare your own in `tsconfig.json`, as
 {
   "compilerOptions": { ... },
   "seamscript": {
+    "edition": "2026",   // the rules this project is checked by (see packages/compiler)
     "sources": ["NativeBridge.receive", "AppStore.load", "readConfig"],
     // "unknown" (the default): a library's `any` is an error until decoded (SEAM2005). "allow" lets it through.
     "externalAny": "unknown"

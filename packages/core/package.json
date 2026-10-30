@@ -1,6 +1,6 @@
 {
   "name": "@seamscript/core",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "WASM core for SeamScript's Text: grapheme segmentation and normalization at a pinned Unicode version",
   "keywords": [
     "seamscript",
@@ -32,8 +32,18 @@
     "test": "cargo test -q && sh scripts/fetch-ucd.sh && tsc -p tsconfig.json --noEmit && vitest run"
   },
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Shogo256/SeamScript.git",
+    "directory": "packages/core"
+  },
+  "homepage": "https://github.com/Shogo256/SeamScript/tree/main/packages/core#readme",
+  "bugs": "https://github.com/Shogo256/SeamScript/issues",
+  "publishConfig": {
+    "access": "public"
+  },
   "devDependencies": {
-    "@seamscript/runtime": "0.0.0",
+    "@seamscript/runtime": "0.1.0",
     "@types/node": "24.19.2",
     "fast-check": "4.10.2",
     "typescript": "5.9.3",
@@ -41,7 +51,7 @@
     "vitest": "5.0.3"
   },
   "peerDependencies": {
-    "@seamscript/runtime": "0.0.0"
+    "@seamscript/runtime": "0.1.0"
   },
   "engines": {
     "node": ">=20"
