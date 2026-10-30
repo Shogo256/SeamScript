@@ -1,5 +1,6 @@
 // End to end: a production `vite build` of a .seam.ts app bundles the WASM core,
 // and the core is installed before the app's own code runs.
+import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { build } from "vite";
@@ -28,6 +29,22 @@ it("a production build runs Text on the WASM core", async () => {
   });
   const { report } = await import(pathToFileURL(join(outDir, "main.js")).href);
   expect(report).toEqual({ deterministic: true, unicodeVersion: "17.0.0", family: 1 });
+});
+
+it("a build fails on a SeamScript error instead of bundling the plain TypeScript it was turned into", async () => {
+  const [entry] = project({
+    "app/main.seam.ts": "export function f() {\n  boundary Inside { a: string }\n  return Inside;\n}\n",
+  });
+  const outDir = join(dirname(entry!), "dist");
+  const built = build({
+    root: dirname(entry!),
+    logLevel: "silent",
+    configFile: false,
+    plugins: [seamscript()],
+    build: { outDir, target: "es2022", lib: { entry: entry!, formats: ["es"], fileName: "main" } },
+  });
+  await expect(built).rejects.toThrow(/SEAM1102/);
+  expect(existsSync(join(outDir, "main.js"))).toBe(false);
 });
 
 async function bundle(files: Record<string, string>, core?: boolean | "deferred") {
