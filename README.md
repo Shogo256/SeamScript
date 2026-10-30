@@ -247,6 +247,8 @@ Completion, hover types, go to definition, rename, and both TypeScript and SeamS
   const same = [m.label, m.placedAt] as const;   // readonly [string, Zoned]
   ```
 
+- **Pin your bundler's version.** SeamScript emits TypeScript; the JavaScript that ships is what your bundler makes of it, so for code that runs on other people's pages (an embedded widget, for example) keep the bundler's version in your lockfile and update it deliberately.
+
 - **On the dev server, Text runs on the browser's ICU** (the WASM core isn't loaded, so startup is fast). `Text.status` is then `"host"`, and the Unicode version depends on the browser. In production builds it is `"core"`.
 
 ## Packages
