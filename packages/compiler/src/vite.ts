@@ -24,6 +24,25 @@ export default function seamscript(options: SeamScriptPluginOptions = {}): Plugi
   return {
     name: "seamscript",
     enforce: "pre",
+    // The dev server scans the app's modules for dependencies to pre-bundle with
+    // Rolldown, outside the plugin pipeline: it has to be shown the TypeScript a
+    // .seam.ts file compiles to, or it stops at the first `boundary` and skips
+    // pre-bundling. Errors are left to the transform above, which reports them.
+    config: () => ({
+      optimizeDeps: {
+        rolldownOptions: {
+          plugins: [
+            {
+              name: "seamscript:scan",
+              transform(code: string, id: string) {
+                const file = id.split("?", 1)[0]!;
+                return isSeamFile(file) ? { code: transform(code, file).code } : null;
+              },
+            },
+          ],
+        },
+      },
+    }),
     configResolved(config) {
       // Not config.isProduction: that follows NODE_ENV, which a test runner or a
       // staging build sets to something else while still building for real.
