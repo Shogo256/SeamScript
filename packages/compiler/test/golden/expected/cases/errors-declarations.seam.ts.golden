@@ -38,7 +38,7 @@ type NotOne = A | Shape;
 declare const NotOne: __Decoder<NotOne>;
 
 export function nested() {
-  boundary Inside { a: string }
+  type Inside = { a: string }; const Inside: __ObjectDecoder<Inside> = null!;
   return 1;
 }
 
