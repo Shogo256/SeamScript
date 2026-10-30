@@ -281,6 +281,8 @@ describe("latest", () => {
 
   it("rejects generators", () => {
     expect(codes("latest async function* f() {}")).toEqual(["SEAM1401"]);
+    // Still a plain async generator, so TypeScript reports nothing more about it.
+    expect(run("export latest async function* f() { yield 1; }").code).toBe("export async function* f() { yield 1; }");
   });
 
   it("keeps a generic function's type parameters and spells a written return type", () => {

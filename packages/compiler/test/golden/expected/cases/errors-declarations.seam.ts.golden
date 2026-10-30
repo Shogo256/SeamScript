@@ -42,7 +42,7 @@ export function nested() {
   return 1;
 }
 
-export latest async function* stream() {
+export async function* stream() {
   yield ok(1);
 }
 

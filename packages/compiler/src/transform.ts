@@ -274,6 +274,7 @@ export function transform(source: string, fileName: string, options: TransformOp
     const fn = node.declaration;
     if (fn.generator) {
       scope.report(node, Codes.latestShape, "A latest function cannot be a generator; remove the `*` and return the final value (a latest function settles once per call).");
+      rejected.push(node);
       continue;
     }
     const name = fn.id!.name;
