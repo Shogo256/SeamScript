@@ -29,6 +29,7 @@ Checking runs in two passes. The first pass finds the sources of outside data (i
 | URL and page state | `URLSearchParams.get` / `getAll`, `Location.hash`, `History.state`, `Document.cookie` |
 | Messages | `MessageEvent.data` (WebSocket, workers, `postMessage`), `ExtendableMessageEvent.data`, `PushMessageData.json()` / `text()` |
 | Clipboard and files | `Clipboard.readText()`, `DataTransfer.getData`, `Blob.text()`, `Blob.arrayBuffer()`, `Blob.bytes()` (files, MediaRecorder chunks), `FileReader.result` |
+| Node.js (from `@types/node`) | `process.env.X` and `process.env[name]` (each variable read; `process.env` used whole is Unknown whole; writes and `delete` are not affected), `fs.readFileSync`, `fs/promises` `readFile` (also `fs.promises.readFile`), and the `data` parameter of `fs.readFile`'s callback. `JSON.parse` is a source everywhere |
 | Audio | `MediaStreamTrack.getSettings()` (a device may not deliver what was asked for), and the first parameter of `process` in a class that extends `AudioWorkletProcessor`: each of its elements (`inputs[0]`) is `Unknown`, to be decoded as `Planar<Float32, Channels>` |
 
 `location.search` is not a source: read it through `URLSearchParams`. Writes (`location.hash = "#a"`) are not affected. TypeScript's lib has no AudioWorklet scope, so `AudioWorkletProcessor` is whatever the project declares under that name; destructuring `process`'s inputs is SEAM2004.

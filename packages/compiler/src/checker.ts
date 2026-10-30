@@ -51,7 +51,7 @@ export interface SourceSite {
 // Members of TypeScript's lib whose results come from outside the program.
 // DOM input values (HTMLInputElement.value, ...) are deliberately absent: the DOM
 // always returns a string there, and the spec makes Text.nfc(...) the explicit step.
-type SourceKind = "call" | "async" | "read";
+type SourceKind = "call" | "async" | "read" | "env" | "callback";
 
 const SOURCES = new Map<string, SourceKind>([
   ["Body.json", "async"], // Response.json(), Request.json()
@@ -82,6 +82,21 @@ const SOURCES = new Map<string, SourceKind>([
   ["FileReader.result", "read"],
 ]);
 
+// Node.js, as @types/node declares it (matched only in its own declaration files).
+//  - env: `process.env.X` (or `process.env[name]`) is Unknown; `process.env` used
+//    whole (assigned, spread, destructured, passed on) is Unknown as a whole.
+//  - callback: `fs.readFile(path, ..., (err, data) => ...)`: `data` is Unknown.
+const NODE_SOURCES = new Map<string, SourceKind>([
+  ["Process.env", "env"],
+  ["fs.readFileSync", "call"],
+  ["fs.readFile", "callback"],
+  ["fs/promises.readFile", "async"], // also fs.promises.readFile and node:fs/promises
+]);
+// Called by name after `import { readFileSync } from "node:fs"`.
+const NODE_BARE = new Set(["readFileSync", "readFile"]);
+
+const isNodeTypes = (file: ts.SourceFile) => /[\\/]node_modules[\\/]@types[\\/]node[\\/]/.test(file.fileName);
+
 /** Options from a project's `"seamscript"` settings in tsconfig.json (see config.ts). */
 export interface CheckerOptions {
   /**
@@ -106,7 +121,7 @@ export function createChecker(ts: typeof import("typescript"), options: CheckerO
   // Member names of the sources. Only accesses with one of these names are
   // resolved through the type checker: resolving every member access would cost
   // nearly a full type check on top of the second program's.
-  const SOURCE_MEMBERS = new Set([...SOURCES.keys(), ...userSources].map((k) => k.slice(k.indexOf(".") + 1)));
+  const SOURCE_MEMBERS = new Set([...SOURCES.keys(), ...NODE_SOURCES.keys(), ...userSources].map((k) => k.slice(k.lastIndexOf(".") + 1)));
   const BARE_SOURCES = new Set([...userSources].filter((k) => !k.includes(".")));
 
   function memberName(node: ts.PropertyAccessExpression | ts.ElementAccessExpression): string | undefined {
@@ -118,7 +133,7 @@ export function createChecker(ts: typeof import("typescript"), options: CheckerO
   function ownerName(decl: ts.Declaration): string | undefined {
     const owner = decl.parent;
     if ((ts.isInterfaceDeclaration(owner) || ts.isClassDeclaration(owner)) && owner.name) return owner.name.text;
-    if (ts.isModuleBlock(owner) && ts.isIdentifier(owner.parent.name)) return owner.parent.name.text;
+    if (ts.isModuleBlock(owner) && (ts.isIdentifier(owner.parent.name) || ts.isStringLiteral(owner.parent.name))) return owner.parent.name.text;
     if (ts.isTypeLiteralNode(owner)) {
       const holder = owner.parent;
       if ((ts.isVariableDeclaration(holder) || ts.isPropertySignature(holder) || ts.isPropertyDeclaration(holder)) && ts.isIdentifier(holder.name)) return holder.name.text;
@@ -141,6 +156,7 @@ export function createChecker(ts: typeof import("typescript"), options: CheckerO
         const kind = SOURCES.get(name);
         if (kind !== undefined) return { kind, name };
       }
+      if (owner !== undefined && NODE_SOURCES.has(name) && isNodeTypes(decl.getSourceFile())) return { kind: NODE_SOURCES.get(name)!, name };
       if (owner !== undefined && userSources.has(name)) return { kind: userKind(decl), name };
       const topLevel = owner === undefined && (ts.isFunctionDeclaration(decl) || ts.isVariableDeclaration(decl));
       if (topLevel && BARE_SOURCES.has(name)) return { kind: userKind(decl), name };
@@ -199,6 +215,9 @@ export function createChecker(ts: typeof import("typescript"), options: CheckerO
     // The first parameter of `process` in AudioWorkletProcessor subclasses: audio from the audio thread.
     const workletInputs = new Set<ts.Symbol>();
     const workletInputNames = new Set<string>();
+    // The data parameter of fs.readFile's callback.
+    const dataParams = new Set<ts.Symbol>();
+    const dataParamNames = new Set<string>();
 
     const visit = (node: ts.Node): void => {
       let source: { kind: SourceKind; name: string } | undefined;
@@ -220,10 +239,12 @@ export function createChecker(ts: typeof import("typescript"), options: CheckerO
         }
       } else if (ts.isIdentifier(node) && workletInputNames.has(node.text) && isBareReference(node) && workletInputs.has(checker.getSymbolAtLocation(node)!)) {
         sites.push({ start: node.getStart(file), end: node.getEnd(), async: false, each: true });
+      } else if (ts.isIdentifier(node) && dataParamNames.has(node.text) && isBareReference(node) && dataParams.has(checker.getSymbolAtLocation(node)!)) {
+        sites.push({ start: node.getStart(file), end: node.getEnd(), async: false });
       }
       if ((ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) && SOURCE_MEMBERS.has(memberName(node) ?? "") && !isAssignmentTarget(node)) {
         source = sourceOf(program, memberSymbol(checker, node));
-      } else if (ts.isIdentifier(node) && BARE_SOURCES.has(node.text) && isBareReference(node)) {
+      } else if (ts.isIdentifier(node) && (BARE_SOURCES.has(node.text) || NODE_BARE.has(node.text)) && isBareReference(node)) {
         const symbol = checker.getSymbolAtLocation(node);
         source = sourceOf(program, symbol && symbol.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(symbol) : symbol);
       }
@@ -231,6 +252,34 @@ export function createChecker(ts: typeof import("typescript"), options: CheckerO
         const expr = node as ts.Expression;
         if (source.kind === "read") {
           sites.push({ start: expr.getStart(file), end: expr.getEnd(), async: false });
+        } else if (source.kind === "env") {
+          // process.env.X is read, unless it is written or deleted; process.env alone is read whole.
+          const outer = expr.parent;
+          const member = (ts.isPropertyAccessExpression(outer) || ts.isElementAccessExpression(outer)) && outer.expression === expr;
+          if (!member) sites.push({ start: expr.getStart(file), end: expr.getEnd(), async: false });
+          else if (!isAssignmentTarget(outer) && !ts.isDeleteExpression(outer.parent)) sites.push({ start: outer.getStart(file), end: outer.getEnd(), async: false });
+        } else if (source.kind === "callback") {
+          const call = expr.parent;
+          const callback = ts.isCallExpression(call) && call.expression === expr ? call.arguments.at(-1) : undefined;
+          if (callback !== undefined && (ts.isArrowFunction(callback) || ts.isFunctionExpression(callback))) {
+            const data = callback.parameters[1];
+            if (data !== undefined && ts.isIdentifier(data.name)) {
+              const symbol = checker.getSymbolAtLocation(data.name);
+              if (symbol !== undefined) {
+                dataParams.add(symbol);
+                dataParamNames.add(data.name.text);
+              }
+            } else if (data !== undefined) {
+              findings.push({ pos: data.getStart(file), end: data.getEnd(), code: Codes.sourceDestructure, message: "Destructuring the data fs.readFile reads would skip marking it Unknown; take it as one parameter and decode it." });
+            }
+          } else if (!(ts.isCallExpression(call) && call.expression === expr)) {
+            findings.push({
+              pos: expr.getStart(file),
+              end: expr.getEnd(),
+              code: Codes.sourceReference,
+              message: `${source.name} passes outside data to its callback, so it must be called directly with the callback written in place; a reference to it (.bind, .call, an alias) cannot be tracked.`,
+            });
+          }
         } else {
           const call = expr.parent;
           if (ts.isCallExpression(call) && call.expression === expr) {
@@ -254,12 +303,12 @@ export function createChecker(ts: typeof import("typescript"), options: CheckerO
           if ((!ts.isIdentifier(key) && !ts.isStringLiteral(key)) || !SOURCE_MEMBERS.has(key.text)) continue;
           type ??= checker.getTypeAtLocation(node);
           const source = sourceOf(program, type.getProperty(key.text));
-          if (source?.kind === "read") {
+          if (source?.kind === "read" || source?.kind === "env") {
             findings.push({
               pos: element.getStart(file),
               end: element.getEnd(),
               code: Codes.sourceDestructure,
-              message: `Destructuring ${source.name} would skip marking it Unknown; read it as a property (\`event.${key.text}\`) and decode it.`,
+              message: `Destructuring ${source.name} would skip marking it Unknown; read it as a property (\`${source.name === "Process.env" ? "process" : "event"}.${key.text}\`) and decode it.`,
             });
           }
         }
