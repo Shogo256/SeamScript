@@ -20,10 +20,7 @@ packages/compiler/test/golden/cases/errors-declarations.seam.ts(25,27): error SE
 packages/compiler/test/golden/cases/errors-declarations.seam.ts(26,22): error SEAM1104: A union boundary may only list other boundaries: `boundary Event = Paid | Refunded`.
 packages/compiler/test/golden/cases/errors-declarations.seam.ts(27,23): error SEAM1106: Shape is a type, not a boundary: only boundaries carry a decoder. Declare it with `boundary Shape { ... }` instead of `type` or `interface`.
 packages/compiler/test/golden/cases/errors-declarations.seam.ts(30,3): error SEAM1102: A boundary must be declared at the top level of a module; move it out of the function or block (export it if other modules need it).
-packages/compiler/test/golden/cases/errors-declarations.seam.ts(34,1): error TS1128: Declaration or statement expected.
 packages/compiler/test/golden/cases/errors-declarations.seam.ts(34,8): error SEAM1401: A latest function cannot be a generator; remove the `*` and return the final value (a latest function settles once per call).
-packages/compiler/test/golden/cases/errors-declarations.seam.ts(34,8): error TS1434: Unexpected keyword or identifier.
-packages/compiler/test/golden/cases/errors-declarations.seam.ts(34,8): error TS2304: Cannot find name 'latest'.
 packages/compiler/test/golden/cases/errors-declarations.seam.ts(39,51): error SEAM1402: This parameter is an AbortSignal, but its type is not written `AbortSignal`, so it is not recognized: write `AbortSignal` here and the latest function supplies the signal (callers leave it out).
 packages/compiler/test/golden/cases/errors-flow.seam.ts(8,19): error SEAM2001: Unknown data cannot be asserted with `as`; decode it instead (`decode T from ...`).
 packages/compiler/test/golden/cases/errors-flow.seam.ts(8,19): error TS2352: Conversion of type 'Unknown' to type 'Order' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
