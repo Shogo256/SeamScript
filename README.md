@@ -165,6 +165,26 @@ In an AudioWorklet, the first parameter of `process` in a class that extends `Au
 
 [`sandbox/voice`](sandbox/voice) is a working example: microphone audio to a WebSocket echo server and back.
 
+### Node.js
+
+In `.seam.ts` files, `process.env` and the `fs` reads are outside data too, and `@seamscript/runtime/node` gives values that stay Unknown at run time as well:
+
+```ts
+// Node                                       PORT="" listens on a random port; "80a" or unset throws later, in listen
+const port = Number(process.env.PORT);
+server.listen(port);
+```
+
+```ts
+// SeamScript                                 any of those stops here, saying what was wrong
+import { env } from "@seamscript/runtime/node";
+const port = decode Int64 from env.get("PORT");   // or: decode Int64 from process.env.PORT
+if (!port.ok) throw new Error(`PORT: expected ${port.error.expected}, got ${port.error.actual}`);
+server.listen(Number(port.value));
+```
+
+`env.get` / `env.all` and `file.readText` / `file.readJson` return a box: everything but `decode` (reading a property, iterating, `JSON.stringify`, string conversion, ...) throws `UnknownAccess`, even in code the compiler never checked, and `console.log` prints `[Unknown]`. `process.env.X`, `fs.readFileSync`, `fs/promises` `readFile` and `fs.readFile`'s callback data are checked statically by `seamc check` and behave as usual at run time.
+
 ### Chunk streams
 
 `ChunkStream` applies a boundary to a sequence of numbered chunks rather than one value: each chunk is decoded, and the stream delivers them in sequence order, once each.

@@ -85,6 +85,17 @@ Events are `chunk`, `gap`, `duplicate`, `late` (the last three only when asked f
 
 Delivered numbers strictly increase, a skipped number is never delivered later, and with nothing lost and no gap skipped everything is delivered: `spec/chunkstream.tla` checks this with TLC under reordering, duplication and loss (`chunkstream_accept_old.cfg` is a sanity check that must fail).
 
+## Node.js: `@seamscript/runtime/node`
+
+| Entry | Gives |
+|---|---|
+| `env.get(name)` | `process.env[name]`, also when it isn't set (it then decodes as `undefined`, which a target like `Int64` rejects) |
+| `env.all()` | a copy of `process.env` as it is when called |
+| `file.readText(path)` | the file's text (UTF-8), as a promise |
+| `file.readJson(path)` | the file parsed as JSON; malformed JSON rejects with a SyntaxError naming only the path (`decode T from json await file.readText(path)` gives it as a DecodeError instead) |
+
+Each returns an Unknown that hides its contents at run time as well: a Proxy around an empty object, with the value kept outside it. Reading a property, indexing, iterating, spreading, `Object.keys`, `in`, `JSON.stringify`, converting to a string or number, writing, deleting and defining properties all throw `UnknownAccess`, whose message names the operation, never the value. What stays possible: passing it around, awaiting a promise of it (its `then` reads as nothing), `console.log` (prints `[Unknown]`), `decode` (which reads the contents), and `Unknown.log` (prints them, for debugging). `Array.isArray`, the prototype and `typeof` are the same whatever is inside. File errors reject as `fs.readFile`'s do.
+
 ## latest
 
 A `latest async function` returns only the result of the most recent call. Earlier calls become `Stale` (`{ ok: false, error: { kind: "stale" } }`) when they finish, and if the last parameter is an `AbortSignal`, they are aborted (callers don't pass that argument).
