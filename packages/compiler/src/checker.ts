@@ -718,7 +718,11 @@ export function createChecker(ts: typeof import("typescript"), options: CheckerO
           }
         }
       } else if (ts.isSpreadAssignment(node) || ts.isJsxSpreadAttribute(node)) {
-        checkValue(node.expression);
+        // An object spread copies the fields out from under the brand: the copy's
+        // type has only the brand's symbol key, which TypeScript lets pass as
+        // `Record<string, string>` and the like. It never keeps the data Unknown.
+        if (hasUnknown(node.expression)) report(node, Codes.unknownFlow, exitMessage(ts.isJsxSpreadAttribute(node) ? "spread into JSX props" : "spread into an object"));
+        else checkValue(node.expression);
       } else if (ts.isJsxExpression(node)) {
         checkValue(node.expression);
       } else if (ts.isAsExpression(node) || ts.isTypeAssertionExpression(node)) {
