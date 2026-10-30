@@ -1,0 +1,25 @@
+import "@seamscript/core";
+import { __b, __unknown, ChunkStream, Pcm, Text, type Decoder as __Decoder, type ObjectDecoder as __ObjectDecoder } from "@seamscript/runtime";
+// A ChunkStream over a boundary, and Pcm made by the app.
+type Caption = { seq: number, text: Text<"NFC">, final: boolean };
+const Caption: __ObjectDecoder<Caption> = __b.object<Caption>({
+  seq: __b.number,
+  text: __b.text("NFC"),
+  final: __b.boolean,
+});
+
+export function captions(ws: WebSocket, show: (c: Caption) => void) {
+  const stream = ChunkStream.of(Caption, { seq: (c) => c.seq, gap: { wait: 300, then: "drop" }, late: "error" }, (event) => {
+    if (event.kind === "chunk") show(event.value);
+  });
+  ws.onmessage = (e) => stream.push(__unknown(e.data));
+  ws.onclose = () => stream.reset();
+  return stream;
+}
+
+type Chunk = Pcm<"int16", 16000, 1>;
+const Chunk: __Decoder<Chunk> = __b.pcm("int16", 16000, 1);
+
+export function send(ws: WebSocket, samples: Int16Array<ArrayBuffer>) {
+  ws.send(Chunk.encode(Pcm.of("int16", 16000, 1, samples)));
+}

@@ -1,0 +1,8 @@
+import "@seamscript/core";
+import { __b, Int64, Text, Zoned, type ObjectDecoder as __ObjectDecoder } from "@seamscript/runtime";
+export type Customer = { id: Int64, name: Text<"NFC">, since?: Zoned };
+export const Customer: __ObjectDecoder<Customer> = __b.object<Customer>({
+  id: __b.int64,
+  name: __b.length(__b.text("NFC"), 1, 80),
+  since: __b.optional(__b.zoned),
+});

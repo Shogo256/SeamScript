@@ -334,6 +334,10 @@ The goal was to let the frontend of a real-time voice interpretation app be writ
 - **The round trip is checked by content, not by count**: each frame carries a sequence number, the page keeps a SHA-256 of each chunk's samples as sent and compares it with what comes back under that number, and everything played goes through an AnalyserNode whose level must be above an RMS of 0.001 in at least 10 windows during playback. With the microphone replaced by zeros every hash still matches and the test fails on the level, so it can't pass on silence; flipping one byte after hashing is caught as exactly one mismatch.
 - **E2E**: the round trip runs in Chromium with a fake microphone. In this environment headless Firefox never starts an AudioContext (it stays `"suspended"` even after a trusted click, with or without the autoplay and null-audio-backend preferences), and Playwright's WebKit build has no capture device, so those runs are skipped with the reason. The rejection test (a text frame and an odd byte count come back and are rejected with `rule: "type"` and `"frameAlignment"`, and a valid chunk after them still plays) needs only the WebSocket and runs in Chromium and Firefox.
 
+## Keeping output stable across compiler versions
+
+- **Golden tests** (`packages/compiler/test/golden.test.ts`): for whole projects, what `seamc build --production` writes for each `.seam.ts` file and every diagnostic `seamc check` reports are compared with files committed under `test/golden/expected/`. These are the two things SeamScript is responsible for; the JavaScript a bundler makes from the emitted TypeScript is the bundler's, and is not compared. The projects are a curated set written for this (`test/golden/cases/`: every construct, and each diagnostic once, including a syntax error) and the code in this repository written in SeamScript (the sandbox app, the voice sample, the demo). A changed output, a new or vanished output file, or a changed diagnostic fails the test; an intended change is recorded with `UPDATE_GOLDEN=1` and reviewed as a diff.
+
 ## Open questions
 
 ### From the demonstration

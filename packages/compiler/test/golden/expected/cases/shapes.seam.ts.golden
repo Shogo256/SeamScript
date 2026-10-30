@@ -1,0 +1,79 @@
+import "@seamscript/core";
+import { __b, Decimal, Int64, Pcm, Text, Zoned, type Decoder as __Decoder, type ObjectDecoder as __ObjectDecoder, type Bytes, type Planar } from "@seamscript/runtime";
+// Boundaries of every shape: fields of each type, optional and nullable fields,
+// arrays, nested and recursive boundaries, a union boundary, alias boundaries.
+import { Customer } from "./customer.seam";
+
+export type Line = {
+  sku: string,
+  quantity: number,
+  price: Decimal,
+};
+export const Line: __ObjectDecoder<Line> = __b.object<Line>({
+  sku: __b.string,
+  quantity: __b.range(__b.number, 1, 999),
+  price: __b.decimal,
+});
+
+export type Order = {
+  id: Int64,
+  memo: Text<"NFC">,
+  note?: Text<"NFD">,
+  total: Decimal,
+  placedAt: Zoned,
+  status: "open" | "paid" | "void",
+  priority: 1 | 2 | 3,
+  rush: boolean,
+  coupon: string | null,
+  tags: string[],
+  lines: Line[],
+  grid: number[][],
+  parent: Order | null,
+  customer: Customer,
+  "x-trace": string,
+};
+export const Order: __ObjectDecoder<Order> = __b.object<Order>({
+  id: __b.int64,
+  memo: __b.length(__b.text("NFC"), 0, 200),
+  note: __b.optional(__b.text("NFD")),
+  total: __b.decimal,
+  placedAt: __b.zoned,
+  status: __b.literal("open", "paid", "void"),
+  priority: __b.literal(1, 2, 3),
+  rush: __b.boolean,
+  coupon: __b.nullable(__b.string),
+  tags: __b.length(__b.array(__b.string), 0, 10),
+  lines: __b.array(Line),
+  grid: __b.array(__b.array(__b.number)),
+  parent: __b.nullable(__b.lazy(() => Order)),
+  customer: __b.lazy(() => Customer),
+  "x-trace": __b.matches(__b.string, /^[0-9a-f]{16}$/),
+});
+
+export type Paid = { kind: "paid", amount: Decimal };
+export const Paid: __ObjectDecoder<Paid> = __b.object<Paid>({
+  kind: __b.literal("paid"),
+  amount: __b.decimal,
+});
+export type Refunded = { kind: "refunded", reason: Text<"NFC"> };
+export const Refunded: __ObjectDecoder<Refunded> = __b.object<Refunded>({
+  kind: __b.literal("refunded"),
+  reason: __b.text("NFC"),
+});
+export type PaymentEvent = Paid | Refunded;
+export const PaymentEvent: __Decoder<PaymentEvent> = __b.union<PaymentEvent>(() => [Paid, Refunded]);
+
+export type Handle = string;
+export const Handle: __Decoder<Handle> = __b.matches(__b.string, /^[a-z][a-z0-9_]{2,15}$/);
+export type Payload = Bytes;
+export const Payload: __Decoder<Payload> = __b.length(__b.bytes, 0, 65536);
+export type MicChunk = Pcm<"int16", 16000, 1>;
+export const MicChunk: __Decoder<MicChunk> = __b.length(__b.pcm("int16", 16000, 1), 160, 3200);
+export type Stereo = Pcm<"float32", 48000, 2>;
+export const Stereo: __Decoder<Stereo> = __b.pcm("float32", 48000, 2);
+export type Quantum = Planar<"float32", 2>;
+export const Quantum: __Decoder<Quantum> = __b.length(__b.planar("float32", 2), 0, 128);
+
+export function send(order: Order): string {
+  return JSON.stringify(Order.encode(order));
+}

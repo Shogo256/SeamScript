@@ -1,0 +1,39 @@
+import { __b, __decode, __latestFor, Text, fetch, type LatestArgs as __LatestArgs, type LatestReturn as __LatestReturn, type Stale as __Stale, type DecodeError, type Result } from "@seamscript/runtime";
+// latest functions: plain, with an AbortSignal, generic, and a fork.
+import { Order } from "./shapes.seam";
+import { ok } from "@seamscript/runtime";
+
+export function search(...args: __LatestArgs<typeof search__impl, true>): __LatestReturn<typeof search__impl> {
+  return __latestFor(search__impl, { signal: 1 }).apply(undefined, args);
+}
+search.fork = () => __latestFor(search__impl, { signal: 1 }).fork();
+async function search__impl(q: Text<"NFC">, signal: AbortSignal) {
+  const res = await fetch(`/search?q=${encodeURIComponent(q)}`, { signal });
+  return __decode(__b.array(Order), await res.json());
+}
+
+export function count(...args: __LatestArgs<typeof count__impl, false>): __LatestReturn<typeof count__impl> {
+  return __latestFor(count__impl).apply(undefined, args);
+}
+count.fork = () => __latestFor(count__impl).fork();
+async function count__impl(n: number) {
+  return ok(n + 1);
+}
+
+export function get<T extends object>(...args: __LatestArgs<typeof get__impl<T>, true>): Promise<Result<T | null, DecodeError> | __Stale> {
+  return __latestFor(get__impl<T>, { signal: 1 }).apply(undefined, args);
+}
+get.fork = function <T extends object>() { return __latestFor(get__impl<T>, { signal: 1 }).fork(); };
+async function get__impl<T extends object>(key: string, signal: AbortSignal): Promise<Result<T | null, DecodeError>> {
+  void key;
+  void signal;
+  return ok(null);
+}
+
+export async function useSearch(q: Text<"NFC">) {
+  const mine = search.fork();
+  const r = await mine(q);
+  if (!r.ok && r.error.kind === "stale") return [];
+  mine.cancel();
+  return r.ok ? r.value : [];
+}

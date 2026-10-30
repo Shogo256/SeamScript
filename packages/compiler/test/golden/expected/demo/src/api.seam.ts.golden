@@ -1,0 +1,18 @@
+import "@seamscript/core";
+import { __b, Decimal, Int64, Text, type ObjectDecoder as __ObjectDecoder } from "@seamscript/runtime";
+export type Order = {
+  id: Int64,
+  memo: Text<"NFC">,
+  total: Decimal,
+};
+export const Order: __ObjectDecoder<Order> = __b.object<Order>({
+  id: __b.int64,
+  memo: __b.text("NFC"),
+  total: __b.decimal,
+});
+
+export type SearchResult = { query: string, hits: number };
+export const SearchResult: __ObjectDecoder<SearchResult> = __b.object<SearchResult>({
+  query: __b.string,
+  hits: __b.number,
+});

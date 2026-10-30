@@ -1,0 +1,46 @@
+import { Int64 } from "@seamscript/runtime";
+import { createContext, useContext, useSyncExternalStore } from "react";
+import type { Feed } from "../feed.seam";
+
+export const FeedContext = createContext<Feed | null>(null);
+
+export function useFeed(): Feed {
+  const feed = useContext(FeedContext);
+  if (feed === null) throw new Error("FeedContext is missing");
+  return feed;
+}
+
+export function useFeedMeta() {
+  const feed = useFeed();
+  return useSyncExternalStore(feed.subscribe, () => feed.meta);
+}
+
+export function useInstrumentIds() {
+  const feed = useFeed();
+  return useSyncExternalStore(feed.subscribe, () => feed.instrumentIds);
+}
+
+export function useInstrument(id: Int64) {
+  const feed = useFeed();
+  return useSyncExternalStore(feed.subscribe, () => feed.instruments.get(id));
+}
+
+export function useInstrumentInfo(id: Int64) {
+  const feed = useFeed();
+  return useSyncExternalStore(feed.subscribe, () => feed.info.get(id));
+}
+
+export function useOrderIds() {
+  const feed = useFeed();
+  return useSyncExternalStore(feed.subscribe, () => feed.orderIds);
+}
+
+export function useOrder(id: Int64) {
+  const feed = useFeed();
+  return useSyncExternalStore(feed.subscribe, () => feed.orders.get(id));
+}
+
+export function useProblems() {
+  const feed = useFeed();
+  return useSyncExternalStore(feed.subscribe, () => feed.problems);
+}

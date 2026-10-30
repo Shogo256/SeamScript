@@ -1,0 +1,55 @@
+import { Unknown, fetch, type DecodeError, type Result } from "@seamscript/runtime";
+// fetch with every failure as a value. decode only checks the shape of data that
+// parsed; a body that is not JSON at all makes res.json() throw, so that is
+// caught here and reported like any other problem.
+import { err, ok, type SeamResponse } from "@seamscript/runtime";
+
+export type HttpProblem =
+  | { readonly kind: "network"; readonly message: string }
+  | { readonly kind: "json"; readonly status: number; readonly message: string };
+
+export interface JsonReply {
+  readonly status: number;
+  readonly body: Unknown;
+}
+
+export async function requestJson(url: string, init?: RequestInit): Promise<Result<JsonReply, HttpProblem>> {
+  let res: SeamResponse;
+  try {
+    res = await fetch(url, init);
+  } catch (e) {
+    return err({ kind: "network", message: describe(e) });
+  }
+  try {
+    return ok({ status: res.status, body: await res.json() });
+  } catch (e) {
+    return err({ kind: "json", status: res.status, message: describe(e) });
+  }
+}
+
+export type GetProblem = HttpProblem | { readonly kind: "status"; readonly status: number };
+
+/** A GET whose only acceptable answer is 200. */
+export async function getJson(url: string, signal: AbortSignal): Promise<Result<Unknown, GetProblem>> {
+  const r = await requestJson(url, { signal });
+  if (!r.ok) return r;
+  if (r.value.status !== 200) return err({ kind: "status", status: r.value.status });
+  return ok(r.value.body);
+}
+
+export function describe(e: unknown): string {
+  return e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+}
+
+export function describeProblem(p: GetProblem | DecodeError): string {
+  switch (p.kind) {
+    case "network":
+      return `network error (${p.message})`;
+    case "json":
+      return `response is not valid JSON (HTTP ${p.status}: ${p.message})`;
+    case "status":
+      return `HTTP ${p.status}`;
+    case "decode":
+      return `wrong shape: ${p.path.join(".") || "(root)"} should be ${p.expected} but is ${p.actual}`;
+  }
+}

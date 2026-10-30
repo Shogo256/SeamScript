@@ -1,0 +1,165 @@
+import { Int64 } from "@seamscript/runtime";
+import { memo, useEffect, useState } from "react";
+import { useFork } from "@seamscript/react";
+import type { Fill } from "../api.seam";
+import { clock, int, preview, price, statusLabel } from "../format.seam";
+import { describeProblem } from "../http.seam";
+import { cancelOrder, loadOrderDetail } from "../orders.seam";
+import { useInstrumentInfo, useOrder, useOrderIds } from "./hooks.seam";
+
+/** Rows rendered at once; the rest are counted. */
+const SHOWN = 200;
+
+export function Orders() {
+  const ids = useOrderIds();
+  const [selected, setSelected] = useState<Int64 | null>(null);
+  const shown = ids.length > SHOWN ? ids.slice(0, SHOWN) : ids;
+  return (
+    <div className="orders">
+      <section className="panel">
+        <h2>
+          Orders (<span data-testid="order-count">{ids.length}</span>)
+        </h2>
+        <table data-testid="orders">
+          <thead>
+            <tr>
+              <th>Order ID</th>
+              <th>Instrument</th>
+              <th>Side</th>
+              <th className="num">Filled / Qty</th>
+              <th className="num">Price</th>
+              <th>Status</th>
+              <th>Memo</th>
+              <th className="num">Updated</th>
+            </tr>
+          </thead>
+          <tbody>
+            {shown.map((id) => (
+              <OrderRow key={`${id}`} id={id} selected={id === selected} onSelect={setSelected} />
+            ))}
+          </tbody>
+        </table>
+        {ids.length > shown.length ? <p className="more">and {ids.length - shown.length} more</p> : null}
+      </section>
+      <OrderDetailPanel id={selected} />
+    </div>
+  );
+}
+
+const OrderRow = memo(function OrderRow({ id, selected, onSelect }: { id: Int64; selected: boolean; onSelect(id: Int64): void }) {
+  const o = useOrder(id);
+  const info = useInstrumentInfo(o?.instrumentId ?? -1n);
+  if (o === undefined) return null;
+  return (
+    <tr
+      data-testid="order-row"
+      data-id={`${o.id}`}
+      data-status={o.status}
+      data-filled={`${o.filled}`}
+      data-version={`${o.version}`}
+      className={selected ? "selected" : undefined}
+      onClick={() => onSelect(o.id)}
+    >
+      <td className="mono">{`${o.id}`}</td>
+      <td>{info ? `${info.symbol} ${preview(info.name, 8)}` : `${o.instrumentId}`}</td>
+      <td className={o.side}>{o.side === "buy" ? "Buy" : "Sell"}</td>
+      <td className="num">
+        {int(o.filled)} / {int(o.quantity)}
+      </td>
+      <td className="num">{info ? price(o.price, info.tickSize) : o.price}</td>
+      <td className={`state ${o.status}`}>{statusLabel(o.status)}</td>
+      <td className="memo" title={o.memo}>
+        {preview(o.memo, 12)}
+      </td>
+      <td className="num time">{clock(o.updatedAt)}</td>
+    </tr>
+  );
+});
+
+type Loaded = { readonly id: Int64; readonly fills: readonly Fill[] } | { readonly id: Int64; readonly error: string };
+
+function OrderDetailPanel({ id }: { id: Int64 | null }) {
+  const detail = useFork(loadOrderDetail);
+  const order = useOrder(id ?? -1n);
+  const info = useInstrumentInfo(order?.instrumentId ?? -1n);
+  const [loaded, setLoaded] = useState<Loaded | null>(null);
+  const [cancelling, setCancelling] = useState<string | null>(null);
+  const filled = order?.filled;
+
+  useEffect(() => {
+    if (id === null) return;
+    // Refetched when the order fills further. Clicking quickly through orders sends
+    // overlapping requests; `latest` makes all but the newest resolve to Stale.
+    void detail(id).then((r) => {
+      if (r.ok) return setLoaded({ id, fills: r.value.fills });
+      const e = r.error;
+      if (e.kind !== "stale") setLoaded({ id, error: describeProblem(e) });
+    });
+  }, [id, filled, detail]);
+
+  useEffect(() => setCancelling(null), [id]);
+
+  if (id === null || order === undefined) {
+    return (
+      <section className="panel detail">
+        <h2>Order details</h2>
+        <p className="hint">Select an order to see its fills</p>
+      </section>
+    );
+  }
+  // Only what belongs to this order: while another order's answer is all we have, show nothing.
+  const current = loaded !== null && loaded.id === id ? loaded : null;
+  const open = order.status === "open" || order.status === "partially_filled";
+
+  async function cancel() {
+    setCancelling("Cancelling…");
+    const r = await cancelOrder(order!.id);
+    setCancelling(r.ok ? "Cancel request accepted" : r.error.message);
+  }
+
+  return (
+    <section className="panel detail" data-testid="order-detail" data-id={`${id}`} data-loaded-id={current ? `${current.id}` : ""}>
+      <h2>Order {`${order.id}`}</h2>
+      <dl>
+        <dt>Instrument</dt>
+        <dd>{info ? `${info.symbol} ${info.name}` : `${order.instrumentId}`}</dd>
+        <dt>Status</dt>
+        <dd>
+          {statusLabel(order.status)}（{int(order.filled)} / {int(order.quantity)}）
+        </dd>
+        <dt>Memo</dt>
+        <dd>{order.memo || "—"}</dd>
+        <dt>Placed</dt>
+        <dd>{clock(order.createdAt)}</dd>
+      </dl>
+      {open ? (
+        <button type="button" data-testid="cancel" onClick={() => void cancel()}>
+          Cancel
+        </button>
+      ) : null}
+      {cancelling !== null ? <p data-testid="cancel-outcome">{cancelling}</p> : null}
+      <h3>Fills</h3>
+      {current === null ? (
+        <p className="hint">Loading…</p>
+      ) : "error" in current ? (
+        <p className="error" data-testid="detail-error">
+          {current.error}
+        </p>
+      ) : current.fills.length === 0 ? (
+        <p className="hint">No fills</p>
+      ) : (
+        <table data-testid="fills">
+          <tbody>
+            {current.fills.map((f, k) => (
+              <tr key={k}>
+                <td className="num time">{clock(f.at)}</td>
+                <td className="num">{int(f.quantity)}</td>
+                <td className="num">{info ? price(f.price, info.tickSize) : f.price}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </section>
+  );
+}

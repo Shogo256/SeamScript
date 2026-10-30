@@ -1,0 +1,57 @@
+import { __b, __latestFor, Int64, Pcm, Text, type Decoder as __Decoder, type LatestArgs as __LatestArgs, type LatestReturn as __LatestReturn, type ObjectDecoder as __ObjectDecoder, type Planar } from "@seamscript/runtime";
+// Each declaration error once (the SEAM1xxx codes).
+import { ok } from "@seamscript/runtime";
+type Plain = { a: string };
+interface Shape { b: number }
+
+type BadFields = {
+  f: () => void,
+  a: any,
+  u: undefined,
+  n: { x: number },
+  g: Array<string>,
+  t: Text,
+  k: Text<NFKC>,
+  p: Plain,
+  m(): void,
+  s: string,
+  r: number,
+  re: string,
+  audio: Pcm<Int24, 16000, 1>,
+  planar: Planar<"int16", 1>,
+};
+declare const BadFields: __ObjectDecoder<BadFields>;
+
+type A = { kind: "same" };
+const A: __ObjectDecoder<A> = __b.object<A>({
+  kind: __b.literal("same"),
+});
+type B = { kind: "same" };
+const B: __ObjectDecoder<B> = __b.object<B>({
+  kind: __b.literal("same"),
+});
+type NoDiscriminant = A | B;
+declare const NoDiscriminant: __Decoder<NoDiscriminant>;
+type Mixed = A | Int64;
+declare const Mixed: __Decoder<Mixed>;
+type NotOne = A | Shape;
+declare const NotOne: __Decoder<NotOne>;
+
+export function nested() {
+  boundary Inside { a: string }
+  return 1;
+}
+
+export latest async function* stream() {
+  yield ok(1);
+}
+
+type Signal = AbortSignal;
+export function withAlias(...args: __LatestArgs<typeof withAlias__impl, false>): __LatestReturn<typeof withAlias__impl> {
+  return __latestFor(withAlias__impl).apply(undefined, args);
+}
+withAlias.fork = () => __latestFor(withAlias__impl).fork();
+async function withAlias__impl(q: string, signal: Signal) {
+  void signal;
+  return ok(q);
+}

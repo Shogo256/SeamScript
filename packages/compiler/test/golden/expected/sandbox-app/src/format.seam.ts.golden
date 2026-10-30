@@ -1,0 +1,63 @@
+import "@seamscript/core";
+import { Decimal, Int64, Text, Zoned } from "@seamscript/runtime";
+// Display formatting. Prices stay Decimal until the last step; times are shown
+// in Japan time whatever offset the server wrote them in.
+
+/** Number of fraction digits of a tick size: "0.1" → 1, "5" → 0. */
+export function fractionDigits(tick: Decimal): number {
+  const dot = tick.indexOf(".");
+  return dot < 0 ? 0 : tick.length - dot - 1;
+}
+
+export function price(d: Decimal, tick: Decimal): string {
+  return Decimal.toFixed(d, fractionDigits(tick));
+}
+
+export function signed(d: Decimal, digits: number): string {
+  const s = Decimal.toFixed(d, digits);
+  return Decimal.compare(d, Decimal.from("0")) > 0 ? `+${s}` : s;
+}
+
+/** Change from the previous close, exact, and as a percentage for display. */
+export function change(last: Decimal, prevClose: Decimal): { diff: Decimal; percent: string; sign: -1 | 0 | 1 } {
+  const diff = Decimal.sub(last, prevClose);
+  const sign = Decimal.compare(diff, Decimal.from("0"));
+  // A ratio needs a rounding rule; the percentage is display-only, so a float is enough.
+  const percent = ((Number(diff) / Number(prevClose)) * 100).toFixed(2);
+  return { diff, percent: sign > 0 ? `+${percent}` : percent, sign };
+}
+
+/** Price × quantity, exact. */
+export function notional(p: Decimal, quantity: Int64): Decimal {
+  return Decimal.mul(p, Decimal.from(quantity));
+}
+
+const JST_MS = 9 * 60 * 60_000;
+
+/** HH:MM:SS.mmm in Japan time. */
+export function clock(z: Zoned): string {
+  return new Date(Zoned.toDate(z).getTime() + JST_MS).toISOString().slice(11, 23);
+}
+
+/** At most `max` characters (graphemes), with an ellipsis when cut. */
+export function preview(t: Text<"NFC">, max: number): string {
+  return Text.length(t) > max ? `${Text.slice(t, 0, max)}…` : t;
+}
+
+const STATUS: Record<string, string> = {
+  open: "open",
+  partially_filled: "partially filled",
+  filled: "filled",
+  cancelled: "cancelled",
+};
+
+export function statusLabel(status: string): string {
+  return STATUS[status] ?? status;
+}
+
+const groups = new Intl.NumberFormat("en-US");
+
+/** Int64 with digit grouping, exact (Intl formats bigint without going through a double). */
+export function int(n: Int64): string {
+  return groups.format(n);
+}

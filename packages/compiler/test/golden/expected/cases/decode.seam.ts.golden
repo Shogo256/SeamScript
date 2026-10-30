@@ -1,0 +1,34 @@
+import "@seamscript/core";
+import { __b, __decode, __decodeJson, __unknown, __unknownAsync, Decimal, Text, Unknown, fetch } from "@seamscript/runtime";
+// Every kind of decode target, `from json`, and the results used after the check.
+import { Order, PaymentEvent } from "./shapes.seam";
+
+export async function load(id: string): Promise<string> {
+  const res = await fetch(`/orders/${id}`);
+  const r = __decode(Order, await res.json());
+  if (!r.ok) return `${r.error.path.join(".")}: expected ${r.error.expected}, got ${r.error.actual} (${r.error.rule})`;
+  return Decimal.toFixed(r.value.total, 2);
+}
+
+export function targets(v: Unknown) {
+  const a = __decode(__b.string, v);
+  const b = __decode(__b.array(__b.number), v);
+  const c = __decode(__b.literal("buy", "sell"), v);
+  const d = __decode(__b.array(__b.nullable(Order)), v);
+  const e = __decode(__b.int64, v);
+  const f = __decode(__b.text("NFC"), v);
+  const g = __decode(PaymentEvent, v);
+  const h = __decode(__b.bytes, v);
+  return [a, b, c, d, e, f, g, h];
+}
+
+export async function fromJson(res: Response, ws: WebSocket) {
+  const order = __decodeJson(Order, await __unknownAsync(res.text()));
+  ws.onmessage = (e) => {
+    const event = __decodeJson(PaymentEvent, __unknown(e.data));
+    if (event.ok && event.value.kind === "refunded") console.log(Text.length(event.value.reason));
+  };
+  const json = { body: "{}" };
+  const plain = __decode(__b.string, json.body);
+  return [order, plain];
+}

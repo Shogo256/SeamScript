@@ -1,0 +1,35 @@
+import { __b, __decode, __unknown, __unknownAsync, __unknownEach, fetch, type ObjectDecoder as __ObjectDecoder } from "@seamscript/runtime";
+// Where outside data enters: the lib's sources, the project's own, and an AudioWorklet's inputs.
+import { MicChunk, Quantum } from "./shapes.seam";
+
+declare const NativeBridge: { receive(): string };
+declare function readConfig(): Promise<object>;
+declare class AudioWorkletProcessor {
+  readonly port: MessagePort;
+}
+
+type MicSettings = { sampleRate?: number, channelCount?: number };
+const MicSettings: __ObjectDecoder<MicSettings> = __b.object<MicSettings>({
+  sampleRate: __b.optional(__b.range(__b.number, 8000, 384000)),
+  channelCount: __b.optional(__b.number),
+});
+
+export async function sources(track: MediaStreamTrack, file: File, ws: WebSocket) {
+  const settings = __decode(MicSettings, __unknown(track.getSettings()));
+  const bytes = __decode(__b.bytes, await __unknownAsync(file.arrayBuffer()));
+  const body = __decode(MicChunk, await __unknownAsync((await fetch("/audio")).arrayBuffer()));
+  const saved = __decode(__b.string, __unknown(localStorage.getItem("k")));
+  const q = __decode(__b.string, __unknown(new URLSearchParams(location.search).get("q")));
+  const native = __decode(__b.string, __unknown(NativeBridge.receive()));
+  const config = __decode(__b.array(__b.string), await __unknownAsync(readConfig()));
+  ws.onmessage = (e) => void __decode(MicChunk, __unknown(e.data));
+  return [settings, bytes, body, saved, q, native, config];
+}
+
+export class Capture extends AudioWorkletProcessor {
+  process(inputs: Float32Array[][]): boolean {
+    const block = __decode(Quantum, __unknownEach(inputs)[0]);
+    if (block.ok) this.port.postMessage(block.value.channels[0].slice());
+    return __unknownEach(inputs).length > 0;
+  }
+}

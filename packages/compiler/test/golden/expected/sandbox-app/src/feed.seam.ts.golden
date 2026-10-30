@@ -1,0 +1,514 @@
+import { __b, __decode, __latestFor, __unknown, Decimal, Int64, Text, Unknown, Zoned, type LatestArgs as __LatestArgs, type LatestReturn as __LatestReturn } from "@seamscript/runtime";
+// The app's copy of the market, kept in step with the server.
+//
+// What the language guarantees here: every frame and every snapshot passes
+// `decode`, and of overlapping snapshot requests only the newest is applied
+// (`latest`). Ordering the stream is this module's own design:
+//
+//   - Every event carries the server's sequence number. Events are applied
+//     strictly in sequence order; an early one waits in `pending`, and a
+//     duplicate or an old one is dropped.
+//   - A gap that stays open for `gapMs` (a lost or undecodable frame), a
+//     heartbeat showing the server is ahead, a reconnect that missed events,
+//     or a server restart (new epoch) all lead to the same remedy: fetch a
+//     snapshot, then apply the held events newer than it.
+//   - No frame for `silenceMs` means the connection is dead even if no close
+//     arrived; it is dropped and reopened with backoff.
+//   - While not live, the data stays on screen but is marked stale.
+import { CoreUnavailableError } from "@seamscript/runtime";
+import { Envelope, type Hello, type Heartbeat, type Instrument, type Order, type OrderEvent, ServerMessage, Snapshot, type Tick } from "./api.seam";
+import { describe, describeProblem, getJson } from "./http.seam";
+
+export type FeedStatus = "connecting" | "syncing" | "live" | "offline" | "failed";
+
+export interface Problem {
+  readonly id: number;
+  /** Epoch milliseconds. */
+  readonly at: number;
+  readonly source: "ws" | "snapshot";
+  readonly kind: "frame" | "json" | "decode" | "http" | "epoch" | "unknown-entity" | "core";
+  readonly message: string;
+  /** The sequence number of an undecodable event, when its envelope was still readable. */
+  readonly seq?: Int64;
+}
+
+export interface Counters {
+  frames: number;
+  applied: number;
+  duplicates: number;
+  rejected: number;
+  gaps: number;
+  resyncs: number;
+  snapshots: number;
+  connects: number;
+  disconnects: number;
+}
+
+export interface FeedMeta {
+  readonly status: FeedStatus;
+  readonly epoch: string | null;
+  /** Every event up to this one is applied. */
+  readonly seq: Int64;
+  /** The highest sequence number the server is known to have reached. */
+  readonly serverSeq: Int64;
+  /** Events received ahead of a missing one. */
+  readonly pending: number;
+  readonly counters: Readonly<Counters>;
+  readonly fatal: string | null;
+}
+
+export interface FeedOptions {
+  url?: string;
+  gapMs?: number;
+  silenceMs?: number;
+  /** "frame" (default): views hear about changes once per animation frame. "each": after every frame received (for measurement). */
+  render?: "frame" | "each";
+}
+
+/** The parts of an instrument that do not change within an epoch. */
+export interface InstrumentInfo {
+  readonly id: Int64;
+  readonly symbol: string;
+  readonly name: Text<"NFC">;
+  readonly tickSize: Decimal;
+}
+
+type Event = Tick | OrderEvent;
+
+/** More held-back events than this means the gap will not close by itself. */
+const MAX_PENDING = 5000;
+/** While a snapshot is awaited, events are held for it; this bounds them (about 10 MB). */
+const MAX_PENDING_WHILE_SYNCING = 50_000;
+const MAX_PROBLEMS = 50;
+
+function loadSnapshot(...args: __LatestArgs<typeof loadSnapshot__impl, true>): __LatestReturn<typeof loadSnapshot__impl> {
+  return __latestFor(loadSnapshot__impl, { signal: 0 }).apply(undefined, args);
+}
+loadSnapshot.fork = () => __latestFor(loadSnapshot__impl, { signal: 0 }).fork();
+async function loadSnapshot__impl(signal: AbortSignal) {
+  const r = await getJson("/api/snapshot", signal);
+  if (!r.ok) return r;
+  return __decode(Snapshot, r.value);
+}
+
+export class Feed {
+  meta: FeedMeta;
+  instruments = new Map<Int64, Instrument>();
+  instrumentIds: readonly Int64[] = [];
+  /** Stable objects, so that views of an instrument's name do not re-render on every trade. */
+  info = new Map<Int64, InstrumentInfo>();
+  orders = new Map<Int64, Order>();
+  /** Newest first. */
+  orderIds: readonly Int64[] = [];
+  problems: readonly Problem[] = [];
+
+  private readonly url: string;
+  private readonly gapMs: number;
+  private readonly silenceMs: number;
+  private readonly snapshot = loadSnapshot.fork();
+  private readonly listeners = new Set<() => void>();
+  private readonly counters: Counters = { frames: 0, applied: 0, duplicates: 0, rejected: 0, gaps: 0, resyncs: 0, snapshots: 0, connects: 0, disconnects: 0 };
+  private epoch: string | null = null;
+  private seq = 0n;
+  private serverSeq = 0n;
+  private pending = new Map<Int64, Event>();
+  private ws: WebSocket | null = null;
+  /** The epoch announced by the current connection; null until its hello arrives. */
+  private connEpoch: string | null = null;
+  /** No snapshot applied yet, or one is being fetched: events are held, not applied. */
+  private syncing = true;
+  private fatal: string | null = null;
+  private stopped = false;
+  private attempt = 0;
+  private snapshotFailures = 0;
+  private lastFrameAt = 0;
+  private problemId = 0;
+  private gapTimer: ReturnType<typeof setTimeout> | undefined;
+  private retryTimer: ReturnType<typeof setTimeout> | undefined;
+  private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+  private watchdog: ReturnType<typeof setInterval> | undefined;
+  private readonly handleTimes = new Float64Array(1024);
+  private handled = 0;
+  private frameRequested = false;
+  private readonly renderEach: boolean;
+
+  constructor(options: FeedOptions = {}) {
+    this.url = options.url ?? new URL("/ws", location.href).href.replace(/^http/, "ws");
+    this.gapMs = options.gapMs ?? 400;
+    this.silenceMs = options.silenceMs ?? 3500;
+    this.renderEach = options.render === "each";
+    this.meta = this.buildMeta();
+  }
+
+  readonly subscribe = (listener: () => void): (() => void) => {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  };
+
+  start(): void {
+    this.connect();
+  }
+
+  stop(): void {
+    this.stopped = true;
+    this.snapshot.cancel();
+    this.closeSocket();
+    clearTimeout(this.gapTimer);
+    clearTimeout(this.retryTimer);
+    clearTimeout(this.reconnectTimer);
+  }
+
+  /** p50 / p99 of the time spent handling one frame (decode + apply), over the last 1024 frames. */
+  frameTimes(): { p50: number; p99: number; n: number } {
+    const n = Math.min(this.handled, this.handleTimes.length);
+    if (n === 0) return { p50: 0, p99: 0, n: 0 };
+    const sorted = this.handleTimes.slice(0, n).sort();
+    return { p50: sorted[Math.floor(n * 0.5)]!, p99: sorted[Math.min(n - 1, Math.floor(n * 0.99))]!, n };
+  }
+
+  /** The state as plain strings, for tests that compare it with the server's. */
+  digest(): { epoch: string | null; seq: string; instruments: string[][]; orders: string[][] } {
+    return {
+      epoch: this.epoch,
+      seq: `${this.seq}`,
+      instruments: this.instrumentIds.map((id) => {
+        const i = this.instruments.get(id)!;
+        return [`${i.id}`, i.last, `${i.version}`, `${Zoned.epochNanoseconds(i.updatedAt)}`];
+      }),
+      orders: this.orderIds.map((id) => {
+        const o = this.orders.get(id)!;
+        return [`${o.id}`, o.status, `${o.filled}`, `${o.version}`, o.memo];
+      }),
+    };
+  }
+
+  // ---- Connection ------------------------------------------------------------
+
+  private connect(): void {
+    if (this.stopped || this.fatal !== null) return;
+    const ws = new WebSocket(this.url);
+    this.ws = ws;
+    this.lastFrameAt = Date.now();
+    ws.addEventListener("message", (e) => {
+      if (this.ws === ws) this.onFrame(e);
+    });
+    ws.addEventListener("close", () => {
+      if (this.ws === ws) this.onClosed();
+    });
+    clearInterval(this.watchdog);
+    this.watchdog = setInterval(() => {
+      if (this.ws === ws && Date.now() - this.lastFrameAt > this.silenceMs) {
+        this.closeSocket();
+        this.onClosed();
+      }
+    }, this.silenceMs / 4);
+    this.notify();
+  }
+
+  private closeSocket(): void {
+    const ws = this.ws;
+    this.ws = null;
+    clearInterval(this.watchdog);
+    ws?.close();
+  }
+
+  private onClosed(): void {
+    this.ws = null;
+    this.connEpoch = null;
+    this.counters.disconnects++;
+    clearInterval(this.watchdog);
+    clearTimeout(this.reconnectTimer);
+    const delay = Math.min(5000, 100 * 2 ** this.attempt) * (0.5 + Math.random() / 2);
+    this.attempt++;
+    this.reconnectTimer = setTimeout(() => this.connect(), delay);
+    this.notify();
+  }
+
+  // ---- Frames ----------------------------------------------------------------
+
+  private onFrame(e: MessageEvent): void {
+    const t0 = performance.now();
+    this.lastFrameAt = Date.now();
+    this.counters.frames++;
+    try {
+      this.handleFrame(e);
+    } catch (x) {
+      // decode throws only this (the WASM core could not load); data problems come back as values.
+      if (x instanceof CoreUnavailableError) return this.fail(x);
+      throw x;
+    }
+    this.handleTimes[this.handled++ % this.handleTimes.length] = performance.now() - t0;
+    this.notify();
+  }
+
+  private handleFrame(e: MessageEvent): void {
+    // A binary frame (Blob or ArrayBuffer) is not a string: rejected here, before parsing.
+    const text = __decode(__b.string, __unknown(e.data));
+    if (!text.ok) return this.reject("frame", `non-text frame (${text.error.actual})`);
+    let raw: Unknown;
+    try {
+      raw = __unknown(JSON.parse(text.value));
+    } catch (x) {
+      return this.reject("json", `frame is not valid JSON: ${describe(x)}`);
+    }
+    const m = __decode(ServerMessage, raw);
+    if (!m.ok) {
+      const envelope = __decode(Envelope, raw);
+      const seq = envelope.ok ? envelope.value.seq : undefined;
+      this.reject("decode", describeProblem(m.error), seq);
+      // A known loss: the gap timer will resync unless a good copy (a duplicate) fills it.
+      if (seq !== undefined && seq > this.serverSeq) this.serverSeq = seq;
+      this.checkGap();
+      return;
+    }
+    const msg = m.value;
+    switch (msg.type) {
+      case "hello":
+        return this.onHello(msg);
+      case "heartbeat":
+        return this.onHeartbeat(msg);
+      default:
+        return this.onEvent(msg);
+    }
+  }
+
+  private onHello(h: Hello): void {
+    this.counters.connects++;
+    this.attempt = 0;
+    if (this.epoch !== null && h.epoch !== this.epoch) this.restarted(h.epoch);
+    this.connEpoch = h.epoch;
+    if (h.seq > this.serverSeq) this.serverSeq = h.seq;
+    // Nothing was missed while disconnected: carry on without a snapshot.
+    if (!this.syncing && h.epoch === this.epoch && h.seq === this.seq) {
+      this.checkGap();
+      return;
+    }
+    void this.resync();
+  }
+
+  private onHeartbeat(h: Heartbeat): void {
+    if (this.connEpoch !== null && h.epoch !== this.connEpoch) {
+      this.restarted(h.epoch);
+      this.connEpoch = h.epoch;
+      void this.resync();
+      return;
+    }
+    if (h.seq > this.serverSeq) this.serverSeq = h.seq;
+    this.checkGap();
+  }
+
+  /** The server restarted: sequence numbers start over, so nothing held can be used. */
+  private restarted(epoch: string): void {
+    this.problem("ws", "epoch", `server restarted (epoch ${this.epoch} → ${epoch})`);
+    this.pending.clear();
+    this.serverSeq = 0n;
+    this.syncing = true;
+  }
+
+  private onEvent(ev: Event): void {
+    if (ev.seq > this.serverSeq) this.serverSeq = ev.seq;
+    if ((!this.syncing && ev.seq <= this.seq) || this.pending.has(ev.seq)) {
+      this.counters.duplicates++;
+      return;
+    }
+    if (this.syncing && this.pending.size >= MAX_PENDING_WHILE_SYNCING) {
+      // No snapshot for a long time (the server keeps failing): hold a bounded
+      // number, dropping the oldest. The snapshot will be newer than those; if
+      // it is not, the hole shows up as a gap and leads to another snapshot.
+      this.pending.delete(this.pending.keys().next().value!);
+    }
+    this.pending.set(ev.seq, ev);
+    if (!this.syncing) this.drain();
+  }
+
+  private drain(): void {
+    let addedOrders = false;
+    for (let next = this.pending.get(this.seq + 1n); next !== undefined; next = this.pending.get(this.seq + 1n)) {
+      this.pending.delete(next.seq);
+      addedOrders = this.apply(next) || addedOrders;
+      this.seq = next.seq;
+      this.counters.applied++;
+    }
+    if (addedOrders) this.sortOrderIds();
+    this.checkGap();
+  }
+
+  /** Returns true when a new order appeared. */
+  private apply(ev: Event): boolean {
+    if (ev.type === "tick") {
+      const i = this.instruments.get(ev.instrumentId);
+      if (i === undefined) {
+        this.problem("ws", "unknown-entity", `fill for unknown instrument ${ev.instrumentId}`);
+        return false;
+      }
+      if (ev.seq > i.version) this.instruments.set(i.id, { ...i, last: ev.last, version: ev.seq, updatedAt: ev.at });
+      return false;
+    }
+    const o = ev.order;
+    const current = this.orders.get(o.id);
+    if (current === undefined || o.version > current.version) this.orders.set(o.id, o);
+    return current === undefined;
+  }
+
+  private sortOrderIds(): void {
+    this.orderIds = [...this.orders.keys()].sort((a, b) => (a < b ? 1 : a > b ? -1 : 0));
+  }
+
+  /** Arms a timer for the oldest missing event; if it is still missing when the timer fires, resync. */
+  private checkGap(): void {
+    const behind = this.pending.size > 0 || this.serverSeq > this.seq;
+    if (this.syncing || !behind) {
+      clearTimeout(this.gapTimer);
+      this.gapTimer = undefined;
+      return;
+    }
+    if (this.pending.size > MAX_PENDING) {
+      void this.resync();
+      return;
+    }
+    if (this.gapTimer !== undefined) return;
+    const waitingFor = this.seq + 1n;
+    this.gapTimer = setTimeout(() => {
+      this.gapTimer = undefined;
+      if (this.syncing) return;
+      if (this.seq < waitingFor) {
+        this.counters.gaps++;
+        void this.resync();
+      } else {
+        this.checkGap();
+      }
+      this.notify();
+    }, this.gapMs);
+  }
+
+  // ---- Snapshots -------------------------------------------------------------
+
+  private async resync(): Promise<void> {
+    this.syncing = true;
+    this.counters.resyncs++;
+    clearTimeout(this.gapTimer);
+    this.gapTimer = undefined;
+    clearTimeout(this.retryTimer);
+    this.notify();
+    let r;
+    try {
+      r = await this.snapshot();
+    } catch (x) {
+      if (x instanceof CoreUnavailableError) return this.fail(x);
+      throw x;
+    }
+    // `latest`: applied in the first continuation after the await, so a newer request always wins.
+    if (r.ok) return this.applySnapshot(r.value);
+    const error = r.error;
+    if (error.kind === "stale") return;
+    this.problem("snapshot", error.kind === "decode" ? "decode" : "http", `snapshot: ${describeProblem(error)}`);
+    this.snapshotFailures++;
+    this.retryTimer = setTimeout(() => void this.resync(), Math.min(5000, 200 * 2 ** (this.snapshotFailures - 1)));
+    this.notify();
+  }
+
+  private applySnapshot(s: Snapshot): void {
+    this.counters.snapshots++;
+    this.snapshotFailures = 0;
+    if (this.connEpoch !== null && s.epoch !== this.connEpoch) {
+      // The server restarted between the hello and this request; its next hello resyncs.
+      this.problem("snapshot", "epoch", `snapshot epoch ${s.epoch} differs from the connection's epoch ${this.connEpoch}`);
+      this.retryTimer = setTimeout(() => void this.resync(), 200);
+      this.notify();
+      return;
+    }
+    const sameEpoch = s.epoch === this.epoch;
+    // Never step back: an older snapshot of the same epoch (a cached response) is ignored.
+    if (!sameEpoch || s.seq >= this.seq) {
+      this.epoch = s.epoch;
+      this.seq = s.seq;
+      if (!sameEpoch || s.seq > this.serverSeq) this.serverSeq = s.seq;
+      this.instruments = reuse(this.instruments, s.instruments, sameEpoch);
+      const ids = s.instruments.map((i) => i.id);
+      if (!sameIds(ids, this.instrumentIds)) this.instrumentIds = ids;
+      if (!sameEpoch) this.info = new Map(s.instruments.map((i) => [i.id, { id: i.id, symbol: i.symbol, name: i.name, tickSize: i.tickSize }]));
+      this.orders = reuse(this.orders, s.orders, sameEpoch);
+      this.sortOrderIds();
+    }
+    for (const k of this.pending.keys()) if (k <= this.seq) this.pending.delete(k);
+    this.syncing = false;
+    this.drain();
+    this.notify();
+  }
+
+  // ---- Reporting -------------------------------------------------------------
+
+  private reject(kind: Problem["kind"], message: string, seq?: Int64): void {
+    this.counters.rejected++;
+    this.problem("ws", kind, message, seq);
+  }
+
+  private problem(source: Problem["source"], kind: Problem["kind"], message: string, seq?: Int64): void {
+    const p: Problem = { id: ++this.problemId, at: Date.now(), source, kind, message, ...(seq === undefined ? {} : { seq }) };
+    this.problems = [p, ...this.problems.slice(0, MAX_PROBLEMS - 1)];
+  }
+
+  private fail(x: CoreUnavailableError): void {
+    this.fatal = x.message;
+    this.problem("ws", "core", x.message);
+    this.stop();
+    this.notify();
+  }
+
+  private status(): FeedStatus {
+    if (this.fatal !== null) return "failed";
+    if (this.connEpoch === null) return this.epoch === null ? "connecting" : "offline";
+    if (this.syncing) return "syncing";
+    return "live";
+  }
+
+  private buildMeta(): FeedMeta {
+    return {
+      status: this.status(),
+      epoch: this.epoch,
+      seq: this.seq,
+      serverSeq: this.serverSeq,
+      pending: this.pending.size,
+      counters: { ...this.counters },
+      fatal: this.fatal,
+    };
+  }
+
+  /**
+   * Views are told about changes at most once per animation frame. Applying an
+   * event is cheap; rendering after every one is not, and at around a thousand
+   * messages a second it saturated the main thread, so WebSocket messages queued
+   * up and the screen fell seconds behind. The state itself is always current.
+   */
+  private notify(): void {
+    if (this.renderEach) {
+      this.meta = this.buildMeta();
+      for (const l of this.listeners) l();
+      return;
+    }
+    if (this.frameRequested) return;
+    this.frameRequested = true;
+    nextFrame(() => {
+      this.frameRequested = false;
+      this.meta = this.buildMeta();
+      for (const l of this.listeners) l();
+    });
+  }
+}
+
+/** A map of the new entities, keeping the old object when its version is unchanged (no re-render). */
+function reuse<T extends { id: Int64; version: Int64 }>(old: Map<Int64, T>, next: readonly T[], sameEpoch: boolean): Map<Int64, T> {
+  const out = new Map<Int64, T>();
+  for (const x of next) {
+    const prev = sameEpoch ? old.get(x.id) : undefined;
+    out.set(x.id, prev !== undefined && prev.version === x.version ? prev : x);
+  }
+  return out;
+}
+
+const nextFrame: (f: () => void) => void =
+  typeof requestAnimationFrame === "function" ? (f) => void requestAnimationFrame(f) : (f) => void setTimeout(f, 16);
+
+function sameIds(a: readonly Int64[], b: readonly Int64[]): boolean {
+  return a.length === b.length && a.every((x, i) => x === b[i]);
+}
