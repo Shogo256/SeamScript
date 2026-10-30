@@ -46,6 +46,15 @@ const VERSIONS = {
   vite: "^8.3.4",
 };
 
+/** The Node.js versions seamc runs on: those of Babel 8, which its parser is a fork of. */
+export const NODE_RANGE = "^22.18.0 || >=24.11.0";
+
+/** Whether `version` ("22.18.0", without the "v") is in NODE_RANGE. */
+export function nodeSupported(version) {
+  const [major = 0, minor = 0] = version.split(".").map(Number);
+  return (major === 22 && minor >= 18) || (major === 24 && minor >= 11) || major > 24;
+}
+
 export function parseArgs(argv) {
   const args = { directory: undefined, template: undefined, help: false };
   for (let i = 0; i < argv.length; i++) {
@@ -93,6 +102,7 @@ function packageJson(name, template) {
       "@seamscript/runtime": seamSpec("@seamscript/runtime"),
       ...(react ? { react: VERSIONS.react, "react-dom": VERSIONS["react-dom"] } : {}),
     },
+    engines: { node: NODE_RANGE },
     devDependencies: {
       "@seamscript/compiler": seamSpec("@seamscript/compiler"),
       "@seamscript/ts-plugin": seamSpec("@seamscript/ts-plugin"),
@@ -208,6 +218,12 @@ export function create(directory, template) {
 }
 
 async function main(argv) {
+  // Checked first: on an older Node the app's npm install half-works and the dev
+  // server then fails with an error about native bindings that says nothing of this.
+  if (!nodeSupported(process.versions.node)) {
+    console.error(`SeamScript needs Node.js ${NODE_RANGE.replace("^", "").replace(" || >=", " or later, or ")} or later; this is ${process.version}.`);
+    return 1;
+  }
   const args = parseArgs(argv);
   if (typeof args === "string") {
     console.error(`${args}\n\n${USAGE}`);

@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 // @ts-expect-error: plain JavaScript, no declarations
-import { create, packageName, parseArgs, seamSpec } from "../index.js";
+import { create, nodeSupported, packageName, parseArgs, seamSpec } from "../index.js";
 
 // Apps are created inside the repository so that @seamscript/* resolve through
 // the workspace's node_modules, as they would from npm after `npm install`.
@@ -33,6 +33,11 @@ describe("arguments", () => {
     writeFileSync(join(dir, "x"), "");
     expect(() => create(dir, "react")).toThrow(/not empty/);
   });
+});
+
+it("accepts only the Node.js versions seamc runs on", () => {
+  for (const v of ["22.18.0", "22.20.1", "24.11.0", "24.18.0", "25.0.0", "26.1.2"]) expect(nodeSupported(v), v).toBe(true);
+  for (const v of ["20.12.2", "20.19.0", "22.17.1", "23.11.0", "24.10.0", "18.20.0"]) expect(nodeSupported(v), v).toBe(false);
 });
 
 describe("where the packages come from", () => {

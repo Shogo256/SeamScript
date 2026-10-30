@@ -59,7 +59,7 @@ SeamScript is not published on npm yet (the `@seamscript` scope has not been cla
 nix-shell --run 'yarn install --frozen-lockfile && yarn build'
 ```
 
-The toolchain (Node 24, TypeScript 5.9, Rust with wasm32) is defined in `shell.nix`. Without nix, you need Node 20 or later, yarn 1, and Rust with `rustup target add wasm32-unknown-unknown` already run.
+The toolchain (Node 24, TypeScript 5.9, Rust with wasm32) is defined in `shell.nix`. Without nix, you need Node 22.18 or later (24.11 or later on the 24 line, as Babel 8 requires), yarn 1, and Rust with `rustup target add wasm32-unknown-unknown` already run.
 
 Once the packages are published, a new app starts with one command (Vite + React, or `--template vanilla` for Vite alone), and an existing project installs the packages:
 
