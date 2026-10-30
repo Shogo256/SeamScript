@@ -32,6 +32,22 @@ export async function f(res: Response) {
   });
 });
 
+it("rejects spreading Unknown into an object or JSX props, which copies the fields out unchecked", () => {
+  const source = [
+    'declare function take(r: Record<string, string>): void;',
+    'const copy = { ...JSON.parse("{}") };',
+    "take(copy);",
+    'export const props = <div {...JSON.parse("{}")} />;',
+    'export const fine = { ...{ a: 1 }, b: 2 };',
+    "",
+  ].join("\n");
+  expect(codesByLine(source, "a.seam.tsx")).toEqual([
+    [2, "SEAM2001"],
+    [4, "TS2559"], // TypeScript's own: this test has no JSX types for <div>
+    [4, "SEAM2001"],
+  ]);
+});
+
 describe("sources", () => {
   const sourceFile = (body: string) => `boundary P { a: string }\nexport async function f(e: MessageEvent, s: string, u: URLSearchParams) {\n${body}\n}\n`;
   const flowsOut = (expr: string) => codesByLine(sourceFile(`  const x: string = ${expr};`));
