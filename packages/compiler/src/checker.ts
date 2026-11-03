@@ -609,7 +609,10 @@ export function createChecker(ts: typeof import("typescript"), options: CheckerO
         if (fix !== undefined) findings.push({ pos: expr.parent.getStart(file), end: expr.getEnd(), code: "TS2322", message: "", fix, fixOnly: true });
       }
       if (!absorbs(source, target)) return false;
-      if (assignable) report(expr, Codes.unknownFlow, `Unknown data cannot flow into ${show(target)} here; decode it first (\`decode T from ...\`).`, decodeFix(expr));
+      // The lib's Response would let json() escape as any: the usual cause is a
+      // variable typed for fetch's result, so say what to write instead.
+      const responseHint = show(target) === "Response" ? " `fetch` returns a SeamResponse, whose json() stays Unknown: type the variable `SeamResponse`." : "";
+      if (assignable) report(expr, Codes.unknownFlow, `Unknown data cannot flow into ${show(target)} here; decode it first (\`decode T from ...\`).${responseHint}`, decodeFix(expr));
       return true;
     };
 

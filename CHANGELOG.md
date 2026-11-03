@@ -2,6 +2,16 @@
 
 All `@seamscript/*` packages and `create-seamscript` are released together, with one version number. Releases are on GitHub: https://github.com/Shogo256/SeamScript/releases
 
+## Unreleased
+
+### Fixed
+
+- **A variable typed `Response` for `fetch`'s result was rejected without saying what to write.** `let res: Response; res = await fetch(...)` (the usual shape when the fetch sits in a `try`) is SEAM2001, rightly, as the lib's `Response` lets `json()` escape as `any`; but the type to use, `SeamResponse`, had to be imported by hand. It is now available without an import, like `fetch` itself, and SEAM2001 into `Response` says to type the variable `SeamResponse`. Found by the first app built outside this repository (a messenger screen).
+
+### Tests
+
+- A boundary whose branded fields are all string-based (`Zoned`, `Text`, `Decimal`) keeps their types through `decode`, for one value and for an array. `Encoded<NoInfer<T>>` fixed this; the test guards it, since an `Int64` field hides the bug.
+
 ## 0.1.1
 
 ### Fixed

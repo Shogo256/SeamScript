@@ -37,7 +37,8 @@ export const DEFERRED_CORE_MODULE = "@seamscript/core/deferred";
 
 /** Runtime names a `.seam.ts` file may use without importing them (when it does not bind them itself). */
 const AMBIENT_VALUES = ["ChunkStream", "Decimal", "Int64", "Pcm", "Text", "Unknown", "Zoned", "fetch"];
-const AMBIENT_TYPES = ["Bytes", "DecodeError", "Err", "Ok", "Planar", "Result", "Stale"];
+// SeamResponse is what the ambient `fetch` returns, so that a variable for it can be typed.
+const AMBIENT_TYPES = ["Bytes", "DecodeError", "Err", "Ok", "Planar", "Result", "SeamResponse", "Stale"];
 
 /**
  * An expression to mark as Unknown, found by the checker's first pass. Offsets
