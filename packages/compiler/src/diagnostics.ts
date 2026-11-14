@@ -27,6 +27,7 @@ export const Codes = {
   audioType: "SEAM1302",
   latestShape: "SEAM1401",
   latestSignal: "SEAM1402",
+  latestFetchSignal: "SEAM1403",
   unknownFlow: "SEAM2001",
   unknownLaunder: "SEAM2002",
   sourceReference: "SEAM2003",

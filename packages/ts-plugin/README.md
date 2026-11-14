@@ -12,6 +12,7 @@ Each fix is offered on the diagnostic it repairs, and the fixed code checks clea
 | SEAM2101 | `t.length` becomes `Text.length(t)`; `t[i]` becomes `Text.at(t, i)` |
 | SEAM2201 | `JSON.stringify(order)` becomes `JSON.stringify(Order.encode(order))`; an array of a boundary becomes `orders.map(Order.encode)` |
 | SEAM1402 | The signal parameter's type becomes `AbortSignal` |
+| SEAM1403 | `signal` is passed to the fetch |
 
 ## Usage
 

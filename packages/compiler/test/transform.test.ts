@@ -265,6 +265,7 @@ describe("latest", () => {
         "  return __latestFor(search__impl).apply(undefined, args);\n" +
         "}\n" +
         "search.fork = () => __latestFor(search__impl).fork();\n" +
+        "search.within = (ms: number) => __latestFor(search__impl).within(ms);\n" +
         "async function search__impl(q: string) {\n  return ok(q);\n}",
     );
   });
@@ -292,6 +293,7 @@ describe("latest", () => {
         "  return __latestFor(get__impl<T, K>, { signal: 1 }).apply(undefined, args);\n" +
         "}\n" +
         "get.fork = function <T extends object, const K = string>() { return __latestFor(get__impl<T, K>, { signal: 1 }).fork(); };\n" +
+        "get.within = function <T extends object, const K = string>(ms: number) { return __latestFor(get__impl<T, K>, { signal: 1 }).within(ms); };\n" +
         "async function get__impl<T extends object, const K = string>(key: K, signal: AbortSignal): Promise<Result<T, Text<\"NFC\">>> {}",
     );
     expect(out).toContain("type Stale as __Stale");

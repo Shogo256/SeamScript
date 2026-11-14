@@ -255,4 +255,34 @@ export latest async function optional(q: string, signal?: Sig | undefined): Prom
       [8, "SEAM1402"],
     ]);
   });
+
+  it("reports a fetch in a latest function that does not take the function's signal", () => {
+    const source = `export latest async function search(q: string, signal: AbortSignal): Promise<Result<string, string>> {
+  await fetch("/a");
+  await fetch("/b", { method: "POST" });
+  await fetch("/c", { signal });
+  await fetch("/d", { method: "POST", signal: AbortSignal.any([signal]) });
+  const init = { signal };
+  await fetch("/e", init);
+  await fetch("/f", { ...init });
+  const inner = async () => fetch("/g");
+  await inner();
+  return { ok: true, value: q };
+}
+export latest async function noSignal(q: string): Promise<Result<string, string>> {
+  await fetch("/h");
+  return { ok: true, value: q };
+}
+export async function notLatest(q: string) {
+  await fetch("/i");
+  return q;
+}
+search.within(1000)("x");
+`;
+    expect(codesByLine(source)).toEqual([
+      [2, "SEAM1403"],
+      [3, "SEAM1403"],
+      [9, "SEAM1403"],
+    ]);
+  });
 });

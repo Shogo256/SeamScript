@@ -245,3 +245,103 @@ describe("errors from the function's own Result", () => {
     expect(await fn(-1)).toEqual({ ok: false, error: { kind: "negative" } });
   });
 });
+
+describe("within (deadlines)", () => {
+  afterEach(() => vi.useRealTimers());
+
+  /** A latest function with a signal that settles only when the test says so, or rejects on abort. */
+  function slow() {
+    const pending: ReturnType<typeof deferred<Result<string, never>>>[] = [];
+    const signals: AbortSignal[] = [];
+    const fn = __latest(
+      async (q: string, signal: AbortSignal) => {
+        const d = deferred<Result<string, never>>();
+        pending.push(d);
+        signals.push(signal);
+        signal.addEventListener("abort", () => d.reject(signal.reason));
+        const r = await d.promise;
+        return r.ok ? ok(`${q}:${r.value}`) : r;
+      },
+      { signal: 1 },
+    );
+    return { fn, pending, signals };
+  }
+
+  it("delivers a call that settles before its deadline", async () => {
+    vi.useFakeTimers();
+    const { fn, pending } = slow();
+    const call = fn.within(2000)("a");
+    pending[0]!.resolve(ok("1"));
+    expect(await call).toEqual({ ok: true, value: "a:1" });
+  });
+
+  it("aborts a call that misses its deadline and resolves it to Timeout, without an unhandled AbortError", async () => {
+    vi.useFakeTimers();
+    const { fn, signals } = slow();
+    const call = fn.within(2000)("a");
+    await vi.advanceTimersByTimeAsync(1999);
+    expect(signals[0]!.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await call).toEqual({ ok: false, error: { kind: "timeout", ms: 2000 } });
+    expect(signals[0]!.aborted).toBe(true);
+  });
+
+  it("ignores a result that arrives after the deadline", async () => {
+    vi.useFakeTimers();
+    const fn = __latest(async (q: string) => {
+      await new Promise((r) => setTimeout(r, 3000));
+      return ok(q);
+    });
+    const call = fn.within(1000)("late");
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(await call).toEqual({ ok: false, error: { kind: "timeout", ms: 1000 } });
+  });
+
+  it("makes a call Stale, not Timeout, when a newer call started before its deadline", async () => {
+    vi.useFakeTimers();
+    const { fn, pending, signals } = slow();
+    const first = fn.within(2000)("a");
+    const second = fn.within(2000)("ab");
+    expect(signals[0]!.aborted).toBe(true);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(await first).toEqual(STALE);
+    expect(await second).toEqual({ ok: false, error: { kind: "timeout", ms: 2000 } });
+    expect(pending).toHaveLength(2);
+  });
+
+  it("does not abort a newer plain call when an older call's deadline passes", async () => {
+    vi.useFakeTimers();
+    const { fn, pending, signals } = slow();
+    const first = fn.within(1000)("a");
+    const second = fn("ab");
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(await first).toEqual(STALE);
+    expect(signals[1]!.aborted).toBe(false);
+    pending[1]!.resolve(ok("2"));
+    expect(await second).toEqual({ ok: true, value: "ab:2" });
+  });
+
+  it("shares a fork's line, and a fork's cancel makes a pending deadline call Stale", async () => {
+    vi.useFakeTimers();
+    const { fn, signals } = slow();
+    const line = fn.fork();
+    const call = line.within(5000)("a");
+    line.cancel();
+    expect(signals[0]!.aborted).toBe(true);
+    expect(await call).toEqual(STALE);
+  });
+
+  it("propagates the latest call's own rejection before its deadline", async () => {
+    vi.useFakeTimers();
+    const fn = __latest(async () => {
+      throw new Error("boom");
+    });
+    await expect(fn.within(1000)()).rejects.toThrow("boom");
+  });
+
+  it("refuses a deadline that is not a finite number of milliseconds", () => {
+    const fn = __latest(async () => ok(1));
+    expect(() => fn.within(Number.NaN)()).toThrow(RangeError);
+    expect(() => fn.within(-1)()).toThrow(RangeError);
+  });
+});

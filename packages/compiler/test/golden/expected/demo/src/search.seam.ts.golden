@@ -7,6 +7,7 @@ function search(...args: __LatestArgs<typeof search__impl, false>): __LatestRetu
   return __latestFor(search__impl).apply(undefined, args);
 }
 search.fork = () => __latestFor(search__impl).fork();
+search.within = (ms: number) => __latestFor(search__impl).within(ms);
 async function search__impl(query: string) {
   const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
   return __decode(SearchResult, await res.json());

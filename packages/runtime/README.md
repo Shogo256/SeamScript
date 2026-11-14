@@ -107,6 +107,21 @@ if (!r.ok && r.error.kind === "stale") return;   // a newer search has started
 
 `search.fork()` returns a copy with its own, independent generation. Keep one per component and call `cancel()` on unmount; every call made through that copy then becomes `Stale`. In React, `useFork(search)` from `@seamscript/react` does both. For a generic function, fix the type arguments, as in `search.fork<T>()`. The guarantee holds only when you apply the result in the first continuation right after `await` (don't put another `await` in between).
 
+`search.within(2000)(q)` is the same call with a deadline: if it has not settled 2 seconds after it started, its signal is aborted and it resolves to `Timeout` (`{ ok: false, error: { kind: "timeout", ms: 2000 } }`); if a newer call started meanwhile, it is `Stale` as usual. Calls through `within` and plain calls share one line, on a function and on a fork. Pass the signal on to `fetch` (the compiler reports a fetch that doesn't take it, SEAM1403), or the request goes on after the deadline.
+
+```ts
+const r = await choose.within(2000)(input);
+if (!r.ok && r.error.kind === "timeout") return fallback(input);
+```
+
+## poll
+
+`poll(read, { every, maxEvery?, onResult })` reads again and again, for state that can change on the server while a page is open. One read runs at a time; the next starts `every` ms after the previous one ended. After a failure (an `Err`, or a throw) the wait doubles, up to `maxEvery` (default `every * 8`), and a success brings it back. While the page is hidden no read starts, and when it is shown a read that fell due starts at once. `read` gets an `AbortSignal`; `stop()` aborts a read in flight and drops its result; `now()` reads at once, or right after a read in flight.
+
+```ts
+const status = poll((signal) => readStatus(signal), { every: 5 * 60_000, onResult: (r) => r.ok && r.value.stopped && unmount() });
+```
+
 ## Unknown and fetch
 
 `Unknown` is the type of data from outside, and its only exits are `decode` and `Unknown.log(v)` (for debugging; it only prints the value). Which values are outside data is decided by the compiler: the web APIs that deliver it (`Body.json`, `text`, `arrayBuffer` and `bytes`, `Blob.arrayBuffer` and `bytes`, `MediaStreamTrack.getSettings`, an AudioWorklet's `process` inputs, `JSON.parse`, `Storage.getItem`, `URLSearchParams.get`, `MessageEvent.data`, `IDBRequest.result`, `Clipboard.readText`, `Blob.text`, `FileReader.result`, `Location.hash`, `History.state`, `Document.cookie`, and others), plus whatever the project declares in `tsconfig.json` (see `@seamscript/compiler`). Inside `.seam.ts`, `fetch` comes from this package: underneath it is the global `fetch`, but `res.json()` has the type `Promise<Unknown>`.

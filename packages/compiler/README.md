@@ -71,6 +71,7 @@ A declared method that returns a promise gives `Promise<Unknown>`. `seamc`, the 
 | SEAM1302 | `Pcm` / `Planar` with arguments they don't take (`Pcm<Int24, 16000, 1>`, a rate that isn't a positive whole number, `Planar<Int16, 1>`) |
 | SEAM1401 | A latest function can't be a generator |
 | SEAM1402 | The type of a latest function's AbortSignal parameter isn't written as `AbortSignal` |
+| SEAM1403 | A `fetch` in a latest function doesn't take the function's signal |
 | SEAM2001 | Unknown flows to an exit other than decode (`as`, assignment to `unknown` or `any`, templates, `+`, `in`, `throw`, and so on) |
 | SEAM2002 | A call that takes Unknown and returns any / unknown |
 | SEAM2003 | A method that is a source of outside data is referenced without being called |
@@ -80,7 +81,7 @@ A declared method that returns a promise gives `Promise<Unknown>`. `seamc`, the 
 | SEAM2201 | A value containing a bigint is passed to `JSON.stringify` (pass `Order.encode(o)` instead) |
 | SEAM9001 | Editor plugin only, a warning: the editor's TypeScript is not the version `seamc` checks with (5.9), so the type errors it shows can differ from `seamc check` |
 
-Every message says how to fix the problem. In the editor, the mechanical fixes are quick fixes: SEAM2001, SEAM2005 and TypeScript's assignment errors on a typed variable (`const o: Order = JSON.parse(s)` becomes `const o = decode Order from JSON.parse(s)`), SEAM2101 (`Text.length(t)`, `Text.at(t, i)`), SEAM2201 (`Order.encode(o)`, `orders.map(Order.encode)`) and SEAM1402 (write `AbortSignal`).
+Every message says how to fix the problem. In the editor, the mechanical fixes are quick fixes: SEAM2001, SEAM2005 and TypeScript's assignment errors on a typed variable (`const o: Order = JSON.parse(s)` becomes `const o = decode Order from JSON.parse(s)`), SEAM2101 (`Text.length(t)`, `Text.at(t, i)`), SEAM2201 (`Order.encode(o)`, `orders.map(Order.encode)`) SEAM1402 (write `AbortSignal`) and SEAM1403 (pass `signal`).
 
 ## Bundlers
 

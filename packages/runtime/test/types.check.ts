@@ -178,3 +178,23 @@ search.cancel();
 
 // @ts-expect-error latest functions must return a Result
 __latest(async () => 1);
+
+// within: the deadline adds Timeout to what a call can resolve to, and keeps the caller's arguments.
+async function useWithin() {
+  const res = await withSignal.within(2000)("q");
+  if (res.ok) {
+    const s: string = res.value;
+    void s;
+  } else {
+    const kind: "stale" | "timeout" = res.error.kind;
+    void kind;
+    if (res.error.kind === "timeout") {
+      const ms: number = res.error.ms;
+      void ms;
+    }
+  }
+  // @ts-expect-error a deadline call still takes no signal from the caller
+  void withSignal.within(2000)("q", new AbortController().signal);
+  void forked.within(10)("abc");
+}
+void useWithin;

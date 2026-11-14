@@ -85,6 +85,7 @@ function loadSnapshot(...args: __LatestArgs<typeof loadSnapshot__impl, true>): _
   return __latestFor(loadSnapshot__impl, { signal: 0 }).apply(undefined, args);
 }
 loadSnapshot.fork = () => __latestFor(loadSnapshot__impl, { signal: 0 }).fork();
+loadSnapshot.within = (ms: number) => __latestFor(loadSnapshot__impl, { signal: 0 }).within(ms);
 async function loadSnapshot__impl(signal: AbortSignal) {
   const r = await getJson("/api/snapshot", signal);
   if (!r.ok) return r;
