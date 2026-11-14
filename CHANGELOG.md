@@ -2,7 +2,14 @@
 
 All `@seamscript/*` packages and `create-seamscript` are released together, with one version number. Releases are on GitHub: https://github.com/Shogo256/SeamScript/releases
 
-## Unreleased
+## 0.1.2
+
+### Added
+
+- **Deadlines for `latest` calls: `f.within(ms)(...args)`.** A call that has not settled `ms` milliseconds after it started aborts its `AbortSignal` and resolves to `Timeout` (`{ ok: false, error: { kind: "timeout", ms } }`), or to `Stale` if a newer call started meanwhile. It shares the line with plain calls, on a function and on a fork. Before, a deadline meant a `setTimeout` race written by hand, which neither aborted the request nor kept the latest-wins guarantee. Found by an app whose server calls an AI with a 2-second budget (CS Pro's chat widget).
+- **SEAM1403: a `fetch` in a latest function that does not take the function's signal.** Such a request keeps running after the call is superseded, cancelled or out of time, so the server keeps working (and paying) for an answer nobody reads. The quick fix passes `signal`. An init object that is not a literal, or that spreads another object, is left alone.
+- **`poll(read, { every, maxEvery?, onResult })`** in `@seamscript/runtime`: reads one at a time, `every` ms apart after each read ends, doubles the wait after failures up to `maxEvery`, starts no read while the page is hidden (and reads at once when it is shown if one fell due), and stops for good on `stop()`, aborting a read in flight. For state a page must notice changing on the server, such as a switch that turns a feature off.
+
 
 ### Fixed
 

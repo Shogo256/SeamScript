@@ -313,8 +313,9 @@ export function transform(source: string, fileName: string, options: TransformOp
         `}\n` +
         // A fork of a generic function fixes its type arguments: f.fork<T>().
         (tp
-          ? `${name}.fork = function ${typeParams}() { return __latestFor(${implRef}${options}).fork(); };\n`
-          : `${name}.fork = () => __latestFor(${impl}${options}).fork();\n`) +
+          ? `${name}.fork = function ${typeParams}() { return __latestFor(${implRef}${options}).fork(); };\n` +
+            `${name}.within = function ${typeParams}(ms: number) { return __latestFor(${implRef}${options}).within(ms); };\n`
+          : `${name}.fork = () => __latestFor(${impl}${options}).fork();\n` + `${name}.within = (ms: number) => __latestFor(${impl}${options}).within(ms);\n`) +
         `async function ${impl}`,
     );
     helpers.add("__latestFor");

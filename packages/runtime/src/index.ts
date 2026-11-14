@@ -1,4 +1,4 @@
-export { type Ok, type Err, type Result, type DecodeError, type DecodeRule, type Stale, ok, err } from "./result.js";
+export { type Ok, type Err, type Result, type DecodeError, type DecodeRule, type Stale, type Timeout, ok, err } from "./result.js";
 export { Pcm, type Bytes, type Planar, type SampleFormat, type Samples, type ChannelArrays } from "./audio.js";
 export { Unknown, UnknownAccess, __unknown, __unknownAsync, __unknownEach, __box, __unbox } from "./unknown.js";
 export { Int64 } from "./int64.js";
@@ -29,4 +29,5 @@ export {
   type LatestReturn,
 } from "./latest.js";
 export { fetch, type SeamResponse } from "./fetch.js";
+export { poll, type PollOptions, type Poller } from "./poll.js";
 export { ChunkStream, type StreamPolicy, type StreamEvent, type StreamStats, type StreamAction } from "./stream.js";

@@ -51,6 +51,7 @@ export function withAlias(...args: __LatestArgs<typeof withAlias__impl, false>):
   return __latestFor(withAlias__impl).apply(undefined, args);
 }
 withAlias.fork = () => __latestFor(withAlias__impl).fork();
+withAlias.within = (ms: number) => __latestFor(withAlias__impl).within(ms);
 async function withAlias__impl(q: string, signal: Signal) {
   void signal;
   return ok(q);

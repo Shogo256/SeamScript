@@ -9,6 +9,7 @@ export function searchInstruments(...args: __LatestArgs<typeof searchInstruments
   return __latestFor(searchInstruments__impl, { signal: 1 }).apply(undefined, args);
 }
 searchInstruments.fork = () => __latestFor(searchInstruments__impl, { signal: 1 }).fork();
+searchInstruments.within = (ms: number) => __latestFor(searchInstruments__impl, { signal: 1 }).within(ms);
 async function searchInstruments__impl(query: Text<"NFC">, signal: AbortSignal) {
   const r = await getJson(`/api/instruments?q=${encodeURIComponent(query)}`, signal);
   if (!r.ok) return r;
@@ -20,6 +21,7 @@ export function loadOrderDetail(...args: __LatestArgs<typeof loadOrderDetail__im
   return __latestFor(loadOrderDetail__impl, { signal: 1 }).apply(undefined, args);
 }
 loadOrderDetail.fork = () => __latestFor(loadOrderDetail__impl, { signal: 1 }).fork();
+loadOrderDetail.within = (ms: number) => __latestFor(loadOrderDetail__impl, { signal: 1 }).within(ms);
 async function loadOrderDetail__impl(id: Int64, signal: AbortSignal) {
   const r = await getJson(`/api/orders/${id}`, signal);
   if (!r.ok) return r;

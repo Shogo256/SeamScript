@@ -1,10 +1,16 @@
-import { type Result, type Stale, STALE } from "./result.js";
+import { type Result, type Stale, STALE, type Timeout, timeout } from "./result.js";
 
 export type LatestCall<A extends unknown[], R> = (...args: A) => Promise<R | Stale>;
 
 export type Latest<A extends unknown[], R> = LatestCall<A, R> & {
   /** A copy with its own generation line: its calls never make other lines' calls stale. */
   fork(): LatestFork<A, R>;
+  /**
+   * The same line with a deadline: a call that has not settled `ms` milliseconds after it
+   * started aborts its `AbortSignal` and resolves to `Timeout` (or `Stale`, if a newer call
+   * started meanwhile). Calls through `within` and plain calls share one generation line.
+   */
+  within(ms: number): LatestCall<A, R | Timeout>;
 };
 
 export type LatestFork<A extends unknown[], R> = Latest<A, R> & {
@@ -40,7 +46,7 @@ export function __latest<A extends unknown[], R extends Result<unknown, unknown>
 ): Latest<A, R>;
 export function __latest(fn: AnyFn, options?: LatestOptions): Latest<any[], Result<unknown, unknown>> {
   const root = line(fn, options?.signal);
-  return Object.assign(root.call, { fork: root.fork });
+  return Object.assign(root.call, { fork: root.fork, within: root.within });
 }
 
 const declared = new WeakMap<AnyFn, Latest<any[], Result<unknown, unknown>>>();
@@ -61,7 +67,7 @@ export function __latestFor(fn: AnyFn, options?: LatestOptions): Latest<any[], R
   let l = declared.get(fn);
   if (l === undefined) {
     const root = line(fn, options?.signal);
-    l = Object.assign(root.call, { fork: root.fork });
+    l = Object.assign(root.call, { fork: root.fork, within: root.within });
     declared.set(fn, l);
   }
   return l;
@@ -107,10 +113,42 @@ function line(fn: AnyFn, signalIndex: number | undefined) {
     controller = undefined;
   };
 
+  const within =
+    (ms: number) =>
+    (...args: unknown[]): Promise<Result<unknown, unknown> | Stale | Timeout> => {
+      if (!(Number.isFinite(ms) && ms >= 0)) throw new RangeError(`within: the deadline must be a finite number of milliseconds >= 0, not ${ms}`);
+      const settled = call(...args);
+      const gen = generation;
+      const mine = controller;
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          if (gen !== generation) return resolve(STALE);
+          // Only this call's signal: a newer call has its own controller.
+          if (controller === mine) {
+            mine?.abort();
+            controller = undefined;
+          }
+          resolve(timeout(ms));
+        }, ms);
+        // Once the timer has resolved this promise, the later settlement is ignored, including
+        // the AbortError the abort above causes, so nothing goes unhandled.
+        settled.then(
+          (value) => {
+            clearTimeout(timer);
+            resolve(value);
+          },
+          (error: unknown) => {
+            clearTimeout(timer);
+            reject(error);
+          },
+        );
+      });
+    };
+
   const fork = (): LatestFork<unknown[], Result<unknown, unknown>> => {
     const l = line(fn, signalIndex);
-    return Object.assign(l.call, { fork: l.fork, cancel: l.cancel });
+    return Object.assign(l.call, { fork: l.fork, cancel: l.cancel, within: l.within });
   };
 
-  return { call, cancel, fork };
+  return { call, cancel, fork, within };
 }

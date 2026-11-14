@@ -670,6 +670,52 @@ export function createChecker(ts: typeof import("typescript"), options: CheckerO
       }
     };
 
+    // A latest function hands each call an AbortSignal and aborts it when the call is
+    // superseded, cancelled (fork().cancel()) or out of time (within(ms)). A fetch in its body
+    // that does not take the signal keeps running after the call is dropped: the server keeps
+    // working, and pays, for an answer nobody reads.
+    const fetchChecked = new Set<ts.Node>();
+    const isFetch = (callee: ts.Expression): boolean => {
+      if (!ts.isIdentifier(callee) || callee.text !== "fetch") return false;
+      let symbol = checker.getSymbolAtLocation(callee);
+      if (symbol && symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
+      return (symbol?.declarations ?? []).some((d) => program.isSourceFileDefaultLibrary(d.getSourceFile()) || runtime?.isRuntimeDeclaration(d) === true);
+    };
+    const checkLatestFetch = (call: ts.CallExpression) => {
+      if (call.arguments.length !== 2 || !ts.isIdentifier(call.expression) || call.expression.text !== "__latestFor") return;
+      const target = call.arguments[0]!;
+      const name = ts.isExpressionWithTypeArguments(target) ? target.expression : target;
+      const decl = checker.getSymbolAtLocation(name)?.valueDeclaration;
+      if (decl === undefined || !ts.isFunctionDeclaration(decl) || decl.body === undefined || fetchChecked.has(decl)) return;
+      fetchChecked.add(decl);
+      const signal = decl.parameters.at(-1)?.name;
+      if (signal === undefined || !ts.isIdentifier(signal)) return;
+      const walk = (node: ts.Node): void => {
+        if (ts.isCallExpression(node) && isFetch(node.expression)) {
+          const init = node.arguments[1];
+          const missing =
+            init === undefined
+              ? true
+              : ts.isObjectLiteralExpression(init) &&
+                !init.properties.some((p) => ts.isSpreadAssignment(p) || (p.name !== undefined && ts.isIdentifier(p.name) && p.name.text === "signal"));
+          if (missing) {
+            const edits =
+              init === undefined
+                ? [{ pos: node.arguments[0]!.getEnd(), end: node.arguments[0]!.getEnd(), text: `, { signal: ${signal.text} }` }]
+                : [{ pos: (init as ts.ObjectLiteralExpression).getStart(file) + 1, end: (init as ts.ObjectLiteralExpression).getStart(file) + 1, text: ` signal: ${signal.text},` }];
+            report(
+              node,
+              Codes.latestFetchSignal,
+              `This fetch is in a latest function but does not take its signal, so it keeps running after the call is superseded, cancelled or out of time: pass \`signal: ${signal.text}\`.`,
+              { description: `Pass the latest function's signal (${signal.text})`, edits },
+            );
+          }
+        }
+        ts.forEachChild(node, walk);
+      };
+      ts.forEachChild(decl.body, walk);
+    };
+
     /** Whether a type written in a declaration is `any`, or a type parameter that defaults to `any` (`AxiosResponse<T = any>`). */
     const declaredAny = (type: ts.TypeNode | undefined): boolean => {
       if (type === undefined) return false;
@@ -719,7 +765,10 @@ export function createChecker(ts: typeof import("typescript"), options: CheckerO
     };
 
     const visit = (node: ts.Node): void => {
-      if (ts.isCallExpression(node)) checkLatestSignal(node);
+      if (ts.isCallExpression(node)) {
+        checkLatestSignal(node);
+        checkLatestFetch(node);
+      }
       if (ts.isCallExpression(node) || ts.isNewExpression(node)) {
         const args = node.arguments ?? ts.factory.createNodeArray();
         const unknownArgs = args.map((arg) => (ts.isSpreadElement(arg) ? arg.expression : arg)).filter((value) => !PRIMITIVE_EXPRESSIONS.has(value.kind) && hasUnknown(value));

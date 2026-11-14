@@ -41,6 +41,13 @@ export type DecodeError = {
 
 export type Stale = Err<{ kind: "stale" }>;
 
+/** A `latest` call that did not settle before its deadline (`f.within(ms)`). */
+export type Timeout = Err<{ kind: "timeout"; ms: number }>;
+
+export function timeout(ms: number): Timeout {
+  return Object.freeze({ ok: false, error: Object.freeze({ kind: "timeout", ms }) } as const);
+}
+
 export function ok<T>(value: T): Ok<T> {
   return { ok: true, value };
 }

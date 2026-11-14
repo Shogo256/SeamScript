@@ -85,6 +85,7 @@ In development builds the compiler doesn't import `@seamscript/core`, so during 
 | SEAM1301 | A Text other than `Text<NFC>` / `Text<NFD>` |
 | SEAM1401 | A latest function can't be a generator |
 | SEAM1402 | The type of a latest function's AbortSignal parameter isn't written as `AbortSignal` |
+| SEAM1403 | A `fetch` in a latest function doesn't take the function's signal |
 | SEAM2001 | Unknown flows to an exit other than decode |
 | SEAM2002 | A call that takes Unknown and returns any / unknown |
 | SEAM2003 | A source method is referenced without being called |
@@ -356,6 +357,14 @@ The goal was to let the frontend of a real-time voice interpretation app be writ
 - **The box's target is an empty frozen object**, and the value lives in a WeakMap outside it, so `Array.isArray`, `Object.getPrototypeOf`, `instanceof` and `typeof` say the same for every box. `then` reads as nothing (a promise resolving to a box checks it, and must not see a `then` in the contents), and Node's inspect hook prints `[Unknown]`; every other access throws, naming the operation and never the value. `Unknown.log` stays the one exit that prints the contents.
 - **`file.readJson` rejects malformed JSON with a SyntaxError naming only the path**: `JSON.parse`'s own message quotes the text. To get malformed JSON back as a DecodeError, `decode T from json await file.readText(path)`.
 - **Found on the way: spreading Unknown into an object literal or JSX props is SEAM2001 everywhere.** The copy's type has only the brand's symbol key, which TypeScript lets pass as `Record<string, string>` and the like, so `{ ...JSON.parse(s) }` let the fields out unchecked. An object spread can never keep data Unknown, so it is always reported (an array spread is still allowed where the destination keeps Unknown).
+
+## Deadlines, polling and fetch signals (0.1.2)
+
+Found by the first production app (CS Pro's chat widget), which asks a server that asks an AI, with a 2-second budget: it raced `fetch` against a `setTimeout` by hand, so a late request kept running on the client and, through the server, at the AI, and a reply arriving after the user had moved on could still be shown. Three small additions, each the least that removes that class of bug:
+
+- **`within(ms)` on a latest line, not a new keyword.** A deadline is a property of one call site (the same function is called with 2 s from a text box and 10 s from a chat), so it is a method that returns a call, not part of the declaration. It shares the generation line: a newer call still makes it `Stale`, which wins over `Timeout`, so a screen never shows a timeout for a question the user has already replaced. On expiry it aborts only its own signal, never a newer call's. `Timeout` is a separate `Err` kind rather than `Stale`, because the caller acts on it (falls back), whereas `Stale` is to be ignored. The TLA+ model is unchanged: a timeout is one more way for the current call to settle, delivered under the same generation check.
+- **SEAM1403 checks only what it can see.** A `fetch` in a latest function's body (including nested callbacks) with no init, or with an object-literal init without `signal`, is reported. An init in a variable, or a literal with a spread, is not: the checker can't tell what is in it, and a false error would teach people to silence the check. Any `signal` property counts (`AbortSignal.any([signal, ...])` is legitimate).
+- **`poll` is a runtime function, not language.** Polling has no data that needs the compiler: the reads are ordinary (decode, Result). It runs one read at a time instead of on a fixed timer, so a slow server is never hit by overlapping reads; backs off only on failure; and pauses while the page is hidden, because a background tab polling every few minutes, in every tab a user keeps open, is load nobody sees. Long polling, SSE and debounce stay out: no app here needs them yet.
 
 ## Open questions
 
