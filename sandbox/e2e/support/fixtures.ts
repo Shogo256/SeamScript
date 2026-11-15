@@ -65,8 +65,25 @@ export class App {
   }
 
   async open(path = "/"): Promise<void> {
-    await this.page.goto(path);
+    await this.navigate(path);
     await this.live();
+  }
+
+  /**
+   * Loads a page, trying a second time if the first navigation gets no page within
+   * 20 s. In CI, WebKit has once left the very first request of a page (the HTML,
+   * served by the same backend that had just answered an admin call) without a
+   * response for the whole test. That is the browser or the runner, not the app:
+   * what a test checks starts once the page is there.
+   */
+  async navigate(path = "/"): Promise<void> {
+    try {
+      await this.page.goto(path, { timeout: 20_000 });
+    } catch (e) {
+      if (!(e instanceof Error) || e.name !== "TimeoutError") throw e;
+      base.info().annotations.push({ type: "navigation retried", description: `${path}: ${e.message.split("\n")[0]}` });
+      await this.page.goto(path, { timeout: 20_000 });
+    }
   }
 
   async live(timeout = 15_000): Promise<void> {

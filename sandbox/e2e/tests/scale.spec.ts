@@ -24,7 +24,7 @@ test.describe("Large data", () => {
 
   test("100,000 levels of nesting in an HTTP response: reported without crashing, caught up once fixed", async ({ app, backend, page }, testInfo) => {
     await backend.faults({ http: { deepNesting: 100_000 } });
-    await page.goto("/");
+    await app.navigate("/");
     // Either the browser's JSON parser copes (the field is ignored by decode) or it
     // throws, which the app reports as a problem and retries. Both are fine; a crash is not.
     await expect
