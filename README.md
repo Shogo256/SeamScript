@@ -115,6 +115,32 @@ The common web APIs are sources already. Declare your own in `tsconfig.json`, as
 
 With `"externalAny": "unknown"`, a value whose declared type is `any` in a package's type declarations (`axios`'s `response.data`, for example) is reported where it is used, with a quick fix that decodes it.
 
+### Passing boundaries and outside data around
+
+A boundary is also a value, of type `Decoder<T>`, so one function can fetch and check any of them. `decode` takes it in place of a type name, and `Decoder` needs no import:
+
+```ts
+async function get<T>(b: Decoder<T>, url: string): Promise<Result<T, DecodeError>> {
+  const res = await fetch(url);
+  return decode b from json await res.text();
+}
+
+const order = await get(Order, `/orders/${id}`);
+```
+
+Unknown can be carried anywhere its type says `Unknown`: a field (`{ body: Unknown; at: number }`), an array (`Unknown[]`), a parameter (`(raw: Unknown) => ...`) or a return value. What is stopped is losing the mark (`unknown`, `any`, `as`, a template string, ...), not carrying the value. `fetch`'s result is a `SeamResponse`, which can be passed and returned like any value; only a place typed with the lib's `Response` is an error, because its `json()` would hand the data out as `any`.
+
+In tests, `Unknown.of(value)` marks a value as outside data, so it is checked exactly as a response body would be, without a cast:
+
+```ts
+const r = decode Order from Unknown.of({ id: "1", status: "paid" });   // checked like a response body
+expect(r.ok).toBe(false);                                            // id must be an Int64, total is missing, ...
+```
+
+`Unknown.of` changes nothing at run time. It is allowed in any file: marking a value Unknown only takes uses away from it.
+
+When Unknown data goes somewhere it may not, SEAM2001 says which value holds it and where it came from: ``Unknown data in `text` (from `res.text()`, line 12) cannot flow into string here``, or, for a value that holds Unknown inside it, ``Unknown data in `res.json()` (`res` is SeamResponse) cannot flow into Response | undefined here``.
+
 ### Value constraints
 
 A boundary field's type can be followed by constraints, checked when the value is decoded (and by `encode`, which throws `EncodeRangeError` for a value that would not decode again):

@@ -10,6 +10,7 @@ import {
   MAX_DEPTH,
   type ObjectDecoder,
   type Text,
+  Unknown,
   type Zoned,
 } from "../src/index.js";
 
@@ -399,5 +400,16 @@ describe("constraints", () => {
     expect((caught as EncodeRangeError).path).toEqual(["tags"]);
     expect((caught as Error).message).toBe('Expected string[] of length 2 or less, got length 3 at ["tags"]');
     expect(Account.encode(value)).toEqual({ ...good, quota: "5" });
+  });
+});
+
+describe("Unknown.of", () => {
+  it("leaves the value as it is, for decode to check like outside data", () => {
+    const value = { a: "x" };
+    const u = Unknown.of(value);
+    expect(u).toBe(value);
+    const P = __b.object<{ a: string }>({ a: __b.string });
+    expect(__decode(P, u)).toEqual({ ok: true, value: { a: "x" } });
+    expect(__decode(P, Unknown.of({ a: 1 })).ok).toBe(false);
   });
 });

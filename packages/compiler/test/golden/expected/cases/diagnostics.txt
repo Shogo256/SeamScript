@@ -22,11 +22,11 @@ packages/compiler/test/golden/cases/errors-declarations.seam.ts(27,23): error SE
 packages/compiler/test/golden/cases/errors-declarations.seam.ts(30,3): error SEAM1102: A boundary must be declared at the top level of a module; move it out of the function or block (export it if other modules need it).
 packages/compiler/test/golden/cases/errors-declarations.seam.ts(34,8): error SEAM1401: A latest function cannot be a generator; remove the `*` and return the final value (a latest function settles once per call).
 packages/compiler/test/golden/cases/errors-declarations.seam.ts(39,51): error SEAM1402: This parameter is an AbortSignal, but its type is not written `AbortSignal`, so it is not recognized: write `AbortSignal` here and the latest function supplies the signal (callers leave it out).
-packages/compiler/test/golden/cases/errors-flow.seam.ts(8,19): error SEAM2001: Unknown data cannot be asserted with `as`; decode it instead (`decode T from ...`).
+packages/compiler/test/golden/cases/errors-flow.seam.ts(8,19): error SEAM2001: Unknown data in `v` (from `res.json()`, line 7) cannot be asserted with `as`; decode it instead (`decode T from ...`).
 packages/compiler/test/golden/cases/errors-flow.seam.ts(8,19): error TS2352: Conversion of type 'Unknown' to type 'Order' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
   Type 'Unknown' is missing the following properties from type 'Order': id, memo, total, placedAt, and 10 more.
-packages/compiler/test/golden/cases/errors-flow.seam.ts(9,22): error SEAM2001: Unknown data cannot flow into unknown here; decode it first (`decode T from ...`).
-packages/compiler/test/golden/cases/errors-flow.seam.ts(10,19): error SEAM2001: Unknown data cannot be interpolated into a template; decode it first (`decode T from ...`).
+packages/compiler/test/golden/cases/errors-flow.seam.ts(9,22): error SEAM2001: Unknown data in `v` (from `res.json()`, line 7) cannot flow into unknown here; decode it first (`decode T from ...`).
+packages/compiler/test/golden/cases/errors-flow.seam.ts(10,19): error SEAM2001: Unknown data in `v` (from `res.json()`, line 7) cannot be interpolated into a template; decode it first (`decode T from ...`).
 packages/compiler/test/golden/cases/errors-flow.seam.ts(11,15): error SEAM2001: Unknown data cannot be concatenated or added; decode it first (`decode T from ...`).
 packages/compiler/test/golden/cases/errors-flow.seam.ts(11,15): error TS2365: Operator '+' cannot be applied to types 'Unknown' and 'number'.
 packages/compiler/test/golden/cases/errors-flow.seam.ts(12,15): error SEAM2001: Unknown data cannot be tested with `in`; decode it first (`decode T from ...`).
@@ -38,5 +38,5 @@ packages/compiler/test/golden/cases/errors-flow.seam.ts(17,44): error TS2339: Pr
 packages/compiler/test/golden/cases/errors-flow.seam.ts(19,13): error SEAM2101: .length works on UTF-16 code units; use Text.length(t) for graphemes.
 packages/compiler/test/golden/cases/errors-flow.seam.ts(20,17): error SEAM2101: Indexing Text reads UTF-16 code units; use Text.at(t, i) for graphemes.
 packages/compiler/test/golden/cases/errors-flow.seam.ts(21,31): error SEAM2201: JSON.stringify cannot serialize bigint (Int64 is a bigint); pass the boundary's encoded form, e.g. `Order.encode(order)`.
-packages/compiler/test/golden/cases/errors-flow.seam.ts(22,20): error SEAM2001: Unknown data cannot be thrown; decode it first (`decode T from ...`).
+packages/compiler/test/golden/cases/errors-flow.seam.ts(22,20): error SEAM2001: Unknown data in `v` (from `res.json()`, line 7) cannot be thrown; decode it first (`decode T from ...`).
 packages/compiler/test/golden/cases/errors-syntax.seam.ts(5,1): error SEAM1000: Unexpected token

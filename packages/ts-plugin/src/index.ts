@@ -12,7 +12,7 @@
 // with the wraps the code was made with, and when they differ the code is made
 // again and the check repeated. The wrapped program finds the same sites, so this
 // settles after one round.
-import { createChecker, type Finding } from "@seamscript/compiler/checker";
+import { createChecker, type Finding, withOriginLine } from "@seamscript/compiler/checker";
 import { readSeamConfig } from "@seamscript/compiler/config";
 import { isSeamFile, RUNTIME_MODULE, type UnknownWrap } from "@seamscript/compiler/transform";
 import type { Language, LanguagePlugin } from "@volar/language-core";
@@ -106,7 +106,13 @@ const plugin = createLanguageServicePlugin((tsModule, info) => {
       const fromFinding = (code: SeamCode, file: ts.SourceFile | undefined, f: Finding) => {
         const start = toSource(code, f.pos);
         const end = toSource(code, Math.max(f.pos, f.end - 1)) + 1;
-        const d = diagnostic(file, start, end - start, f.code, f.message);
+        let originLine: number | undefined;
+        if (f.origin !== undefined) {
+          const at = toSource(code, f.origin);
+          originLine = 1;
+          for (let i = code.source.indexOf("\n"); i >= 0 && i < at; i = code.source.indexOf("\n", i + 1)) originLine++;
+        }
+        const d = diagnostic(file, start, end - start, f.code, withOriginLine(f.message, originLine));
         if (f.fix !== undefined) {
           // Every edit must land in text kept from the source, or the fix is not offered.
           const changes = f.fix.edits.map((e) => {
@@ -164,7 +170,7 @@ const plugin = createLanguageServicePlugin((tsModule, info) => {
             : [{ file, start: 0, length: 0, messageText: mismatch, category: tsModule.DiagnosticCategory.Warning, code: 9001 /* SEAM9001 */, source: "seamscript" }]),
           ...fromTransform(code, file, false),
           ...[...findings, ...checker.checkFlows(program, file, runtimeOf(fileName))].flatMap((f) => {
-            const shifted = { ...f, pos: f.pos - lead, end: f.end - lead, ...(f.fix ? { fix: { ...f.fix, edits: f.fix.edits.map((e) => ({ ...e, pos: e.pos - lead, end: e.end - lead })) } } : {}) };
+            const shifted = { ...f, pos: f.pos - lead, end: f.end - lead, ...(f.origin !== undefined ? { origin: f.origin - lead } : {}), ...(f.fix ? { fix: { ...f.fix, edits: f.fix.edits.map((e) => ({ ...e, pos: e.pos - lead, end: e.end - lead })) } } : {}) };
             const d = fromFinding(code, file, shifted);
             return f.fixOnly ? [] : [d];
           }),
