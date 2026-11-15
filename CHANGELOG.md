@@ -2,7 +2,7 @@
 
 All `@seamscript/*` packages and `create-seamscript` are released together, with one version number. Releases are on GitHub: https://github.com/Shogo256/SeamScript/releases
 
-## Unreleased
+## 0.1.3
 
 ### Added
 

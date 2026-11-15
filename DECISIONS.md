@@ -366,7 +366,7 @@ Found by the first production app (CS Pro's chat widget), which asks a server th
 - **SEAM1403 checks only what it can see.** A `fetch` in a latest function's body (including nested callbacks) with no init, or with an object-literal init without `signal`, is reported. An init in a variable, or a literal with a spread, is not: the checker can't tell what is in it, and a false error would teach people to silence the check. Any `signal` property counts (`AbortSignal.any([signal, ...])` is legitimate).
 - **`poll` is a runtime function, not language.** Polling has no data that needs the compiler: the reads are ordinary (decode, Result). It runs one read at a time instead of on a fixed timer, so a slow server is never hit by overlapping reads; backs off only on failure; and pauses while the page is hidden, because a background tab polling every few minutes, in every tab a user keeps open, is load nobody sees. Long polling, SSE and debounce stay out: no app here needs them yet.
 
-## Passing boundaries and outside data around (after 0.1.2)
+## Passing boundaries and outside data around (0.1.3)
 
 Raised by a user's list of language proposals. Of the five, two already worked and only needed to be shown (a boundary as a `Decoder<T>` argument; Unknown in fields, arrays and parameters typed Unknown), one was already the design (`SeamResponse` passes freely; only the lib's `Response` is refused), and two were new:
 
