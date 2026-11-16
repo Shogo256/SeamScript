@@ -1,6 +1,6 @@
 {
   "name": "@seamscript/runtime",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Runtime library for SeamScript: boundary decoders, latest, Text / Int64 / Decimal / Zoned",
   "keywords": [
     "seamscript",

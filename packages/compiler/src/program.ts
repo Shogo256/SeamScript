@@ -14,7 +14,7 @@ import { decodedMappings, originalPositionFor, TraceMap } from "@jridgewell/trac
 // Loaded with require: importing TypeScript's CommonJS API as ESM makes Node
 // scan all of it for export names first, about 100 ms on every run.
 import ts = require("typescript");
-import { type CheckerOptions, createChecker, type Finding } from "./checker.js";
+import { type CheckerOptions, createChecker, type Finding, withOriginLine } from "./checker.js";
 import type { Diagnostic } from "./diagnostics.js";
 import { isSeamFile, RUNTIME_MODULE, type TransformResult, transform, type UnknownWrap } from "./transform.js";
 
@@ -217,7 +217,12 @@ export function createSeamProgram(
 
 function fromFinding(f: Finding, fileName: string, sf: ts.SourceFile, map: TraceMap): Diagnostic {
   const pos = sf.getLineAndCharacterOfPosition(f.pos);
-  return { file: fileName, ...originalPosition(map, pos.line, pos.character), code: f.code, message: f.message, category: "error" };
+  let originLine: number | undefined;
+  if (f.origin !== undefined) {
+    const o = sf.getLineAndCharacterOfPosition(f.origin);
+    originLine = originalPosition(map, o.line, o.character).line;
+  }
+  return { file: fileName, ...originalPosition(map, pos.line, pos.character), code: f.code, message: withOriginLine(f.message, originLine), category: "error" };
 }
 
 function fromTs(d: ts.Diagnostic, map: TraceMap | undefined): Diagnostic {

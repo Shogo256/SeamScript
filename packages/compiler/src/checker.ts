@@ -31,6 +31,19 @@ export interface Finding {
   fix?: Fix;
   /** Not a diagnostic: a fix for TypeScript's own error `code` over this span. */
   fixOnly?: boolean;
+  /**
+   * Where the Unknown data in a SEAM2001 came from, in the transformed file. Its
+   * line in the source goes where `message` holds ORIGIN_LINE (see `withOriginLine`).
+   */
+  origin?: number;
+}
+
+/** Stands in a finding's message for ", line N" of its `origin`, which only the caller can map to the source. */
+export const ORIGIN_LINE = "\u0000origin-line\u0000";
+
+/** A finding's message with its origin's 1-based source line filled in (or left out when unknown). */
+export function withOriginLine(message: string, line: number | undefined): string {
+  return message.replace(ORIGIN_LINE, line === undefined ? "" : `, line ${line}`);
 }
 
 /** Edits in the transformed file's positions, all within text kept from the source. */
@@ -395,13 +408,14 @@ export function createChecker(ts: typeof import("typescript"), options: CheckerO
     const ENV_HINT =
       " To check one variable, decode it: `const port = decode Int64 from process.env.PORT`, then `port.ok`; a variable that isn't set fails to decode (actual: \"undefined\").";
 
-    const report = (node: ts.Node, code: string, message: string, fix?: Fix) =>
+    const report = (node: ts.Node, code: string, message: string, fix?: Fix, origin?: number) =>
       findings.push({
         pos: node.getStart(file),
         end: node.getEnd(),
         code,
         message: code === Codes.unknownFlow && isWholeProcessEnv(node) ? message + ENV_HINT : message,
         ...(fix ? { fix } : {}),
+        ...(origin !== undefined ? { origin } : {}),
       });
 
     // ---- Fixes -------------------------------------------------------------------------
@@ -577,7 +591,94 @@ export function createChecker(ts: typeof import("typescript"), options: CheckerO
     const hasUnknown = (node: ts.Expression) => containsUnknown(typeOf(node)) || narrowedUnknown(node);
     const narrowedMessage = "Unknown data stays Unknown after a type guard such as `typeof`; decode it instead (`decode T from ...`).";
 
-    const exitMessage = (what: string) => `Unknown data cannot be ${what}; decode it first (\`decode T from ...\`).`;
+    // ---- Where the Unknown data is, for messages ---------------------------------------
+
+    /** Source text on one line, shortened: messages quote it. */
+    const quote = (node: ts.Node, max = 40): string => {
+      const text = node.getText(file).replace(/\s+/g, " ");
+      return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+    };
+
+    /** The value itself, without parentheses, `await`, `!` or the compiler's Unknown marker. */
+    const bare = (e: ts.Expression): ts.Expression => {
+      for (;;) {
+        if (ts.isParenthesizedExpression(e) || ts.isAwaitExpression(e) || ts.isNonNullExpression(e)) e = e.expression;
+        else if (ts.isCallExpression(e) && ts.isIdentifier(e.expression) && e.expression.text.startsWith("__unknown") && e.arguments[0]) e = e.arguments[0];
+        else return e;
+      }
+    };
+
+    /** The expression a `const` got its value from, followed through other consts: `text` in `const text = await res.text()` → `res.text()`. */
+    const originOf = (expr: ts.Expression): ts.Expression | undefined => {
+      let origin: ts.Expression | undefined;
+      let e = bare(expr);
+      for (let i = 0; i < 8 && ts.isIdentifier(e); i++) {
+        const decl = checker.getSymbolAtLocation(e)?.valueDeclaration;
+        if (decl === undefined || !ts.isVariableDeclaration(decl) || !ts.isIdentifier(decl.name) || decl.initializer === undefined) break;
+        if (decl.getSourceFile() !== file || !(ts.getCombinedNodeFlags(decl) & ts.NodeFlags.Const)) break;
+        e = origin = bare(decl.initializer);
+      }
+      return origin;
+    };
+
+    /** Where in a value of type `t` its Unknown is, as an access: "" (it is Unknown), ".json()", "[i].body"; undefined if not found. */
+    const unknownPath = (t: ts.Type, depth = 0): string | undefined => {
+      if (depth > 6 || !containsUnknown(t)) return undefined;
+      if (brandOf(t) === "Unknown") return "";
+      if (t.isUnionOrIntersection()) {
+        for (const m of t.types) {
+          const p = unknownPath(m, depth + 1);
+          if (p !== undefined) return p;
+        }
+        return undefined;
+      }
+      if (!(t.flags & ts.TypeFlags.Object)) return undefined;
+      const awaited = checker.getAwaitedType(t);
+      if (awaited !== undefined && awaited !== t) return unknownPath(awaited, depth + 1);
+      if (checker.isArrayLikeType(t)) {
+        const element = checker.getIndexTypeOfType(t, ts.IndexKind.Number);
+        const p = element && unknownPath(element, depth + 1);
+        return p === undefined ? undefined : `[i]${p}`;
+      }
+      for (const prop of checker.getPropertiesOfType(t)) {
+        if (typeof prop.escapedName === "string" && prop.escapedName.startsWith("__")) continue;
+        const p = unknownPath(checker.getTypeOfSymbol(prop), depth + 1);
+        if (p !== undefined) return `.${prop.name}${p}`;
+      }
+      for (const sig of t.getCallSignatures()) {
+        const p = unknownPath(sig.getReturnType(), depth + 1);
+        if (p !== undefined) return `()${p}`;
+      }
+      return undefined;
+    };
+
+    /**
+     * Which value holds the Unknown data and where it came from, for a message:
+     * " in `text` (from `res.text()`, line 12)", " from `e.data`",
+     * " in `res.json()` (`res` is SeamResponse)".
+     */
+    const placeOf = (expr: ts.Expression): { text: string; origin?: number } => {
+      const e = bare(expr);
+      const name = quote(e);
+      const type = typeOf(expr);
+      const path = unknownPath(type);
+      if (path === "") {
+        const origin = originOf(expr);
+        if (origin !== undefined) return { text: ` in \`${name}\` (from \`${quote(origin)}\`${ORIGIN_LINE})`, origin: origin.getStart(file) };
+        return { text: ts.isIdentifier(e) ? ` in \`${name}\`` : ` from \`${name}\`` };
+      }
+      const shown = show(type);
+      const typeText = shown.length > 60 ? `${shown.slice(0, 59)}…` : shown;
+      if (path === undefined) return { text: ` in \`${name}\` (${typeText})` };
+      return { text: ` in \`${name.length > 30 ? "…" : name}${path}\` (\`${name}\` is ${typeText})` };
+    };
+
+    const exitMessage = (what: string, place = "") => `Unknown data${place} cannot be ${what}; decode it first (\`decode T from ...\`).`;
+    /** Reports `node` for letting out the Unknown data in `expr` (by default, `node` itself). */
+    const reportExit = (node: ts.Node, what: string, expr: ts.Expression) => {
+      const place = placeOf(expr);
+      report(node, Codes.unknownFlow, exitMessage(what, place.text), undefined, place.origin);
+    };
 
     /**
      * A value flowing into the place its contextual type describes. Returns whether
@@ -611,8 +712,13 @@ export function createChecker(ts: typeof import("typescript"), options: CheckerO
       if (!absorbs(source, target)) return false;
       // The lib's Response would let json() escape as any: the usual cause is a
       // variable typed for fetch's result, so say what to write instead.
-      const responseHint = show(target) === "Response" ? " `fetch` returns a SeamResponse, whose json() stays Unknown: type the variable `SeamResponse`." : "";
-      if (assignable) report(expr, Codes.unknownFlow, `Unknown data cannot flow into ${show(target)} here; decode it first (\`decode T from ...\`).${responseHint}`, decodeFix(expr));
+      const response = (target.isUnion() ? target.types : [target]).some((t) => show(t) === "Response");
+      const advice = response
+        ? "`fetch` returns a SeamResponse, whose json() stays Unknown: type it `SeamResponse` instead of `Response`."
+        : "decode it first (`decode T from ...`).";
+      if (!assignable) return true;
+      const place = placeOf(expr);
+      report(expr, Codes.unknownFlow, `Unknown data${place.text} cannot flow into ${show(target)} here; ${advice}`, decodeFix(expr), place.origin);
       return true;
     };
 
@@ -841,7 +947,7 @@ export function createChecker(ts: typeof import("typescript"), options: CheckerO
         // An object spread copies the fields out from under the brand: the copy's
         // type has only the brand's symbol key, which TypeScript lets pass as
         // `Record<string, string>` and the like. It never keeps the data Unknown.
-        if (hasUnknown(node.expression)) report(node, Codes.unknownFlow, exitMessage(ts.isJsxSpreadAttribute(node) ? "spread into JSX props" : "spread into an object"));
+        if (hasUnknown(node.expression)) reportExit(node, ts.isJsxSpreadAttribute(node) ? "spread into JSX props" : "spread into an object", node.expression);
         else checkValue(node.expression);
       } else if (ts.isJsxExpression(node)) {
         checkValue(node.expression);
@@ -851,12 +957,13 @@ export function createChecker(ts: typeof import("typescript"), options: CheckerO
         if (narrowedUnknown(node.expression)) {
           report(node, Codes.unknownFlow, narrowedMessage);
         } else if (containsUnknown(source) && (!containsUnknown(target) || absorbs(source, target))) {
-          report(node, Codes.unknownFlow, "Unknown data cannot be asserted with `as`; decode it instead (`decode T from ...`).");
+          const place = placeOf(node.expression);
+          report(node, Codes.unknownFlow, `Unknown data${place.text} cannot be asserted with \`as\`; decode it instead (\`decode T from ...\`).`, undefined, place.origin);
         }
       } else if (ts.isTemplateSpan(node)) {
-        if (hasUnknown(node.expression)) report(node.expression, Codes.unknownFlow, exitMessage("interpolated into a template"));
+        if (hasUnknown(node.expression)) reportExit(node.expression, "interpolated into a template", node.expression);
       } else if (ts.isThrowStatement(node)) {
-        if (hasUnknown(node.expression)) report(node.expression, Codes.unknownFlow, exitMessage("thrown"));
+        if (hasUnknown(node.expression)) reportExit(node.expression, "thrown", node.expression);
       }
 
       if (options.externalAny !== "allow" && (ts.isPropertyAccessExpression(node) || ts.isCallExpression(node) || (ts.isIdentifier(node) && isBareReference(node)))) {

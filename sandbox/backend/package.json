@@ -13,8 +13,8 @@
     "test": "tsc -p tsconfig.json && node --test test/*.test.ts"
   },
   "dependencies": {
-    "@seamscript/core": "0.1.2",
-    "@seamscript/runtime": "0.1.2",
+    "@seamscript/core": "0.1.3",
+    "@seamscript/runtime": "0.1.3",
     "ws": "8.22.0"
   },
   "devDependencies": {

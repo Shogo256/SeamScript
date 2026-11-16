@@ -58,6 +58,10 @@ describe("a project of .seam.ts files", () => {
   it("reports TypeScript's errors and SeamScript's checks where they are", async () => {
     // JSON.parse is outside data: Unknown, so it cannot be asserted or assigned to string.
     expect(codes(await semantic(use)).sort()).toEqual(["SEAM2001@7", "TS2322@8", "TS2352@7"]);
+    // The message names where the Unknown came from, with its line in the source.
+    expect((await semantic(use)).find((d) => d.source === "seamscript")?.text).toBe(
+      'Unknown data in `raw` (from `JSON.parse("{}")`, line 6) cannot be asserted with `as`; decode it instead (`decode T from ...`).',
+    );
     expect(await semantic(api)).toEqual([]);
     expect(await syntactic(api)).toEqual([]);
   });

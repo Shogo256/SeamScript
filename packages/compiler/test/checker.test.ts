@@ -66,9 +66,69 @@ describe("sources", () => {
     const body = (type: string) => `export async function f() {\n  let res: ${type};\n  res = await fetch("/x");\n  return res;\n}\n`;
     const [d] = check({ "a.seam.ts": body("Response") }).diagnostics;
     expect(d?.code).toBe("SEAM2001");
-    expect(d?.message).toContain("type the variable `SeamResponse`");
+    expect(d?.message).toContain("type it `SeamResponse`");
     // SeamResponse needs no import, like fetch itself.
     expect(codesByLine(body("SeamResponse"))).toEqual([]);
+    // The usual shape, `let res: Response | undefined` before a try, gets the hint too.
+    const [u] = check({ "b.seam.ts": body("Response | undefined") }).diagnostics;
+    expect(u?.message).toBe(
+      "Unknown data in `fetch(\"/x\").json()` (`fetch(\"/x\")` is SeamResponse) cannot flow into Response | undefined here; `fetch` returns a SeamResponse, whose json() stays Unknown: type it `SeamResponse` instead of `Response`.",
+    );
+  });
+
+  it("says which value holds the Unknown data and where it came from", () => {
+    const source = `export async function f(res: SeamResponse) {
+  const text = await res.text();
+  const same = text;
+  const s: unknown = same;
+  const t: unknown = await res.json();
+  const box = { inner: [text] };
+  const u: unknown = box;
+  return [s, t, u];
+}
+`;
+    expect(check({ "a.seam.ts": source }).diagnostics.map((d) => [d.line, d.message])).toEqual([
+      [4, "Unknown data in `same` (from `res.text()`, line 2) cannot flow into unknown here; decode it first (`decode T from ...`)."],
+      [5, "Unknown data from `res.json()` cannot flow into unknown here; decode it first (`decode T from ...`)."],
+      [7, "Unknown data in `box.inner[i]` (`box` is { inner: Unknown[]; }) cannot flow into unknown here; decode it first (`decode T from ...`)."],
+    ]);
+  });
+
+  it("lets a function take a boundary as a Decoder, without an import", () => {
+    const source = `boundary Order { id: string }
+async function get<T>(b: Decoder<T>, url: string): Promise<Result<T, DecodeError>> {
+  const res = await fetch(url);
+  return decode b from json await res.text();
+}
+export const order = get(Order, "/orders/1");
+`;
+    expect(codesByLine(source)).toEqual([]);
+  });
+
+  it("lets Unknown be carried in places typed Unknown, and only decode look inside", () => {
+    const source = `boundary P { a: string }
+type Envelope = { body: Unknown; at: number };
+function open(u: Unknown) { return decode P from u; }
+export async function f(res: SeamResponse) {
+  const v = await res.json();
+  const e: Envelope = { body: v, at: 1 };
+  const all: Unknown[] = [v, e.body];
+  open(e.body);
+  const peek: unknown = e.body;
+  return [all, peek];
+}
+`;
+    expect(codesByLine(source)).toEqual([[9, "SEAM2001"]]);
+  });
+
+  it("makes test data Unknown with Unknown.of, which decode then checks", () => {
+    const source = `boundary P { a: string }
+export const ok = decode P from Unknown.of({ a: "x" });
+export const carried: Unknown = Unknown.of(1);
+export const again = Unknown.of(carried);
+const s: string = Unknown.of("x");
+`;
+    expect(codesByLine(source)).toEqual([[5, "TS2322"]]);
   });
 
   it("keeps the brands of an object boundary's fields through decode", () => {

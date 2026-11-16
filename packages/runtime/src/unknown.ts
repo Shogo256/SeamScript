@@ -8,6 +8,14 @@ import type { Brand } from "./brand.js";
 export type Unknown = Brand<"Unknown">;
 
 export const Unknown = {
+  /**
+   * Marks a value as outside data, for tests: `decode Order from Unknown.of({ id: "1" })`
+   * checks it exactly as it would a response body. It changes nothing at run time.
+   * Marking a value Unknown only takes uses away, so it is allowed anywhere.
+   */
+  of<T>(value: T): Unknown {
+    return value as unknown as Unknown;
+  },
   /** Debug-only exit: prints the value (the contents, for a boxed Unknown) and returns nothing. */
   log<T>(value: T): void {
     console.log(__unbox(value));

@@ -2,6 +2,21 @@
 
 All `@seamscript/*` packages and `create-seamscript` are released together, with one version number. Releases are on GitHub: https://github.com/Shogo256/SeamScript/releases
 
+## 0.1.3
+
+### Added
+
+- **`Decoder<T>` needs no import**, like `SeamResponse`. A boundary is a value of this type, and `decode b from json text` already took one in place of a type name, so a single `get<T>(b: Decoder<T>, url)` can fetch and check any boundary; but the type had to be imported from `@seamscript/runtime`, and the README never showed it. Found by an app that wrote the same fetch-and-decode function once per boundary.
+- **`Unknown.of(value)`** marks a value as outside data, for tests: `decode Order from Unknown.of({ ... })` is checked exactly like a response body. Before, tests needed `as unknown as Unknown`. It is an identity function at run time and is allowed everywhere, as marking a value Unknown only takes uses away.
+
+### Changed
+
+- **SEAM2001 says which value holds the Unknown data and where it came from.** ``Unknown data in `text` (from `res.text()`, line 12) cannot flow into string here``; for a value that holds Unknown inside it, the place: ``Unknown data in `res.json()` (`res` is SeamResponse) cannot flow into ...``. The origin follows `const` declarations in the same file. Before, the message only said "Unknown data", which was confusing when the value was a `SeamResponse`, not Unknown itself.
+
+### Fixed
+
+- **The hint to type a variable `SeamResponse` was missing for `Response | undefined`**, the usual type of a variable declared before a `try`. It now shows whenever the destination's type includes the lib's `Response`, and says what to write instead of telling the reader to decode.
+
 ## 0.1.2
 
 ### Added
